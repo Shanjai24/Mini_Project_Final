@@ -66,9 +66,10 @@ export default function Home() {
     }
   ];
 
-  const roles = [
+const roles = [
     {
       name: "Student",
+      roleValue: "Student",
       icon: GraduationCap,
       description: "Find your perfect career path",
       color: "from-blue-500 to-cyan-500",
@@ -76,6 +77,7 @@ export default function Home() {
     },
     {
       name: "HR Professional",
+      roleValue: "Hr",
       icon: Users,
       description: "Optimize your hiring process",
       color: "from-green-500 to-emerald-500",
@@ -122,7 +124,7 @@ export default function Home() {
                   key={role.name}
                   whileHover={{ scale: 1.02, y: -2 }}
                   whileTap={{ scale: 0.98 }}
-                  onClick={() => handleRoleSelect(role.name)}
+                  onClick={() => handleRoleSelect(role.roleValue)}
                   className={cn(
                     "group relative p-6 rounded-2xl bg-gradient-to-br text-white text-left transition-all duration-300 shadow-lg hover:shadow-xl",
                     role.color

@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Eye, EyeOff, Mail, Lock, User, Building } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../utils/cn';
+import { authAPI } from '../services/api';
 
 export default function AuthForm({ role, onClose, onSuccess }) {
   const [isLogin, setIsLogin] = useState(true);
@@ -21,24 +22,40 @@ export default function AuthForm({ role, onClose, onSuccess }) {
 
   const password = watch('password');
 
-  const onSubmit = async (data) => {
-    setIsLoading(true);
-    
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    
-    const userData = {
-      id: Date.now().toString(),
-      name: data.name,
-      email: data.email,
-      role: role,
-      createdAt: new Date().toISOString()
-    };
-    
-    setUser(userData);
-    onSuccess(userData);
+const onSubmit = async (data) => {
+  setIsLoading(true);
+  try {
+    console.log('Submitting with role:', role);
+    const response = await authAPI.login(
+      data.email,
+      data.password,
+      data.name || null,
+      role
+    );
+
+    console.log('Login response:', response);
+
+    // ✅ Save token
+    if (response.token) {
+      localStorage.setItem('token', response.token);
+      localStorage.setItem('user', JSON.stringify(response.user));
+      console.log('Saved token:', localStorage.getItem('token'));
+    } else {
+      console.warn('⚠️ No token received from server');
+    }
+
+    if (response.user) {
+      setUser(response.user);
+      onSuccess(response.user);
+    }
+  } catch (error) {
+    console.error('Authentication error:', error);
+    alert(error.message || 'Authentication failed. Please try again.');
+  } finally {
     setIsLoading(false);
-  };
+  }
+};
+
 
   const toggleMode = () => {
     setIsLogin(!isLogin);

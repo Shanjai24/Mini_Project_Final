@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { authAPI } from '../services/api';
 
 export const useStore = create(
   persist(
@@ -14,11 +15,21 @@ export const useStore = create(
       
       // UI state
       isLoading: false,
-      theme: 'light',
+      theme: 'dark',
       
       // Actions
-      setUser: (user) => set({ user, isAuthenticated: !!user }),
-      logout: () => set({ user: null, isAuthenticated: false }),
+      setUser: (user) => {
+        // Also update localStorage when setting user
+        if (user) {
+          localStorage.setItem('user', JSON.stringify(user));
+        }
+        set({ user, isAuthenticated: !!user });
+      },
+      logout: () => {
+        // Clear localStorage on logout
+        authAPI.logout();
+        set({ user: null, isAuthenticated: false });
+      },
       
       setJobPredictions: (predictions) => set({ jobPredictions: predictions }),
       addJobPrediction: (prediction) => set((state) => ({

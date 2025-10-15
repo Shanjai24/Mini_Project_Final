@@ -1,27 +1,80 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { 
-  TrendingUp, 
-  User, 
-  Briefcase, 
-  Target, 
-  BarChart3,
-  Star,
-  MapPin,
-  DollarSign,
-  Plus,
-  Search,
-  Filter,
-  Users,
-  ClipboardList,
-  GraduationCap,
-  Building2,
-  Upload,
-  FileText
-} from 'lucide-react';
-import { ResponsiveContainer, RadialBarChart, RadialBar, BarChart as RBChart, Bar, XAxis, YAxis, Tooltip, PieChart, Pie, Cell } from 'recharts';
+import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, BarChart as RBChart, Bar, XAxis, YAxis, RadialBarChart, RadialBar } from 'recharts';
+import { Upload, FileText, Users, BarChart3, TrendingUp, ClipboardList, Target, Briefcase, User, GraduationCap, Building2, MapPin, DollarSign, Filter, Search, Star, Plus, X, XCircle } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../utils/cn';
+import { dashboardAPI, resumeAPI, getCurrentUser } from '../services/api';
+import { useNavigate } from 'react-router-dom';
+import { CheckCircle } from 'lucide-react';
+
+const colors = {
+  primary: "#1976d2",
+  success: "#2e7d32",
+  warning: "#ed6c02",
+  error: "#d32f2f",
+  grey: {
+    50: "#fafafa",
+    100: "#f5f5f5",
+    200: "#eeeeee",
+    300: "#e0e0e0",
+    400: "#bdbdbd",
+    500: "#9e9e9e",
+    600: "#757575",
+    700: "#616161",
+    800: "#424242",
+    900: "#212121",
+  },
+};
+
+const styles = {
+  card: {
+    background: 'white',
+    borderRadius: '12px',
+    padding: '24px',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
+    border: `1px solid ${colors.grey[200]}`
+  },
+  label: {
+    fontSize: '14px',
+    fontWeight: 500,
+    color: colors.grey[700],
+    marginBottom: '8px',
+    display: 'block'
+  },
+  input: {
+    width: '100%',
+    padding: '10px 12px',
+    borderRadius: '8px',
+    border: `1px solid ${colors.grey[300]}`,
+    fontSize: '14px',
+    outline: 'none',
+    transition: 'border-color 0.2s ease-in-out',
+  },
+  textarea: {
+    width: '100%',
+    minHeight: '100px',
+    padding: '10px 12px',
+    borderRadius: '8px',
+    border: `1px solid ${colors.grey[300]}`,
+    fontSize: '14px',
+    outline: 'none',
+    resize: 'vertical',
+  },
+  uploadBox: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    height: '128px',
+    border: `2px dashed ${colors.grey[300]}`,
+    borderRadius: '8px',
+    cursor: 'pointer',
+    transition: 'all 0.2s'
+  }
+};
+
+
 
 function Card({ children }) {
   return (
@@ -47,8 +100,13 @@ function ProgressBar({ label, percent, color = 'blue' }) {
 
 export default function Dashboard() {
   const { user, setLoading } = useStore();
-  const role = (user?.role || '').toLowerCase();
-  const isHR = role.includes('hr');
+  const navigate = useNavigate();
+  const [currentUser, setCurrentUser] = useState(null);
+  const [dashboardStats, setDashboardStats] = useState(null);
+  const [uploadHistory, setUploadHistory] = useState([]);
+  const role = String(currentUser?.role || user?.role || '').toLowerCase().trim();
+  const isHR = ['hr', 'hr professional', 'hrprofessional', 'human resources'].includes(role);
+
   const [activeTab, setActiveTab] = useState('overview');
   const [searchTerm, setSearchTerm] = useState('');
 
@@ -58,33 +116,96 @@ export default function Dashboard() {
   const [studentResult, setStudentResult] = useState(null);
 
   // HR tool state
+  const [jobRole, setJobRole] = useState('');
+  const [jobDescription, setJobDescription] = useState('');
+  const [requiredSkills, setRequiredSkills] = useState('');
+  const [minEducation, setMinEducation] = useState('3');
+  const [minExperience, setMinExperience] = useState('0');
+  const [topN, setTopN] = useState(5);
+  const [hrResults, setHrResults] = useState([]);
+  const [hrAllResults, setHrAllResults] = useState([]);
   const [hrFiles, setHrFiles] = useState([]);
   const [hrError, setHrError] = useState('');
-  const [hrResults, setHrResults] = useState([]); // top 5
-  const [hrAllResults, setHrAllResults] = useState([]); // all
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [openDropdowns, setOpenDropdowns] = useState({});
+
+const toggleDropdown = (id) => {
+  setOpenDropdowns((prev) => ({ ...prev, [id]: !prev[id] }));
+};
 
   useEffect(() => {
-    setLoading(true);
-    const t = setTimeout(() => setLoading(false), 400);
-    return () => clearTimeout(t);
-  }, [setLoading]);
+    // Check authentication and load user data
+    const loadUserData = async () => {
+      setLoading(true);
+      try {
+        // Get user from localStorage or API
+        const storedUser = getCurrentUser();
+        if (!storedUser) {
+          navigate('/'); // Redirect to home if not authenticated
+          return;
+        }
+        setCurrentUser(storedUser);
+        
+        // Fetch dashboard stats
+        const stats = await dashboardAPI.getStats();
+        setDashboardStats(stats);
+        
+        // Fetch upload history for HR users
+        if (storedUser.role === 'Hr') {
+          const history = await resumeAPI.getUploadHistory();
+          setUploadHistory(history);
 
-  // Mock data tailored by role
-  const mockData = useMemo(() => {
+          // NEW: also fetch candidates for each upload
+          const token = localStorage.getItem('token');
+          const allCandidates = [];
+
+          for (const upload of history) {
+            const res = await fetch(`http://localhost:3000/api/candidates/${upload.id}`, {
+              headers: { Authorization: `Bearer ${token}` },
+            });
+            if (res.ok) {
+              const data = await res.json();
+              allCandidates.push({ uploadId: upload.id, candidates: data.candidates });
+            }
+          }
+
+          setHrAllResults(allCandidates);
+        }
+      } catch (error) {
+        console.error('Error loading dashboard data:', error);
+        // If token is invalid, redirect to login
+        if (error.message.includes('token')) {
+          navigate('/');
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    loadUserData();
+  }, [setLoading, navigate]);
+
+  // Data tailored by role
+  const dashboardData = useMemo(() => {
     if (isHR) {
       return {
         stats: [
-          { label: 'Open Roles', value: 8, icon: Briefcase, color: 'blue' },
-          { label: 'New Applicants', value: 42, icon: Users, color: 'green' },
-          { label: 'Interviews This Week', value: 12, icon: ClipboardList, color: 'purple' },
-          { label: 'Avg. Match Score', value: '82%', icon: TrendingUp, color: 'orange' }
+          { label: 'Total Uploads', value: dashboardStats?.totalUploads || 0, icon: Upload, color: 'blue' },
+          { label: 'Total Candidates', value: dashboardStats?.totalCandidates || 0, icon: Users, color: 'green' },
+          { label: 'Avg. Match Score', value: `${dashboardStats?.avgScore || 0}%`, icon: TrendingUp, color: 'purple' },
+          { label: 'Recent Uploads', value: uploadHistory?.length || 0, icon: ClipboardList, color: 'orange' }
         ],
-        listTitle: 'Recent Applicants',
-        items: [
-          { id: 1, title: 'Junior Frontend Engineer', company: 'Tech Corp', location: 'thanjavur', salary: '$100k - $140k', matchScore: 91, skills: ['React', 'TypeScript', 'Tailwind'], status: 'Shortlisted' },
-          { id: 2, title: 'Data Analyst', company: 'DataWorks', location: 'America', salary: '$80k - $110k', matchScore: 79, skills: ['SQL', 'Python', 'Tableau'], status: 'Under Review' },
-          { id: 3, title: 'Product Manager', company: 'Buildify', location: 'USA', salary: '$120k - $160k', matchScore: 85, skills: ['Strategy', 'Agile', 'Communication'], status: 'Interviewing' }
-        ],
+        listTitle: 'Recent Uploads',
+        items: uploadHistory?.map((upload, idx) => ({
+          id: upload.id,
+          title: upload.job_role,
+          company: `${upload.total_resumes} resumes`,
+          location: new Date(upload.upload_date).toLocaleDateString(),
+          salary: `Top ${upload.required_candidates} candidates`,
+          matchScore: upload.avg_score ? `${upload.avg_score}` : "0%",
+          skills: upload.skills || [],
+          status: upload.status || 'Completed'
+        })) || [],
         tabs: [
           { id: 'overview', label: 'HR Overview', icon: BarChart3 },
           { id: 'tools', label: 'HR Tools', icon: Briefcase },
@@ -99,17 +220,13 @@ export default function Dashboard() {
     // Student default
     return {
       stats: [
-        { label: 'Predictions', value: 12, icon: Target, color: 'blue' },
-        { label: 'High Matches', value: 5, icon: Star, color: 'green' },
-        { label: 'Applications', value: 7, icon: Briefcase, color: 'purple' },
-        { label: 'Profile Strength', value: '90%', icon: TrendingUp, color: 'orange' }
+        { label: 'Profile Views', value: dashboardStats?.profileViews || 0, icon: Target, color: 'blue' },
+        { label: 'Applications', value: dashboardStats?.applications || 0, icon: Briefcase, color: 'green' },
+        { label: 'Saved Jobs', value: dashboardStats?.savedJobs || 0, icon: Star, color: 'purple' },
+        { label: 'Profile Strength', value: `${dashboardStats?.profileStrength || 75}%`, icon: TrendingUp, color: 'orange' }
       ],
-      listTitle: 'Recommended Roles',
-      items: [
-        { id: 1, title: ' Software Engineer', company: 'InnovateX', location: 'Remote', salary: '$70k - $95k', matchScore: 93, skills: ['JavaScript', 'React', 'Git'], status: 'Recommended' },
-        { id: 2, title: 'Data Scientist (Entry)', company: 'Insights AI', location: 'Austin, TX', salary: '$85k - $110k', matchScore: 81, skills: ['Python', 'Pandas', 'ML'], status: 'Good Match' },
-        { id: 3, title: 'Business Analyst', company: 'Acme Co', location: 'Bengaluru', salary: '₹8L - ₹14L', matchScore: 77, skills: ['Excel', 'SQL', 'Communication'], status: 'Consider' }
-      ],
+      listTitle: 'Your Activity',
+      items: [],
       tabs: [
         { id: 'overview', label: 'Student Overview', icon: BarChart3 },
         { id: 'tools', label: 'Student Tools', icon: GraduationCap },
@@ -117,9 +234,9 @@ export default function Dashboard() {
         { id: 'settings', label: 'Settings', icon: User }
       ],
       headerGreeting: 'Student Dashboard',
-      cta: { label: 'New Prediction', icon: Plus }
+      cta: { label: 'Upload Resume', icon: Plus }
     };
-  }, [isHR]);
+  }, [isHR, dashboardStats, uploadHistory]);
 
   const getStatusColor = (status) => {
     const normalized = status.toLowerCase();
@@ -213,22 +330,33 @@ export default function Dashboard() {
   };
 
   // ---- HR actions ----
-  const onHrFiles = async (e) => {
-    const files = e.target.files || [];
+  const onHrFiles = (e) => {
+    const files = Array.from(e.target.files);
     if (files.length < 5 || files.length > 20) {
-      setHrError('Please upload between 5 and 20 resumes.');
+      setHrError("Please upload between 5 and 20 resumes");
       setHrFiles([]);
-      setHrResults([]);
-      setHrAllResults([]);
       return;
     }
-    setHrError('');
-    const arr = Array.from(files);
-    setHrFiles(arr);
-    const result = analyzeHR(files);
-    setHrResults(result.top5);
-    setHrAllResults(result.all);
+    setHrFiles(files);
+    setHrError("");
   };
+
+  const handleRankCandidates = async () => {
+    if (hrFiles.length < 5 || hrFiles.length > 20) {
+      setHrError('Please upload between 5 and 20 resumes');
+      return;
+    }
+
+    if (!jobRole || !jobDescription) {
+      setHrError('Job role and description are required');
+      return;
+    }
+
+    setIsProcessing(true);
+    setHrError('');
+  };
+
+
 
   // Aggregations for charts
   const studentAcquiredChart = useMemo(() => {
@@ -241,15 +369,47 @@ export default function Dashboard() {
     return studentResult.lacking.map((s) => ({ name: s.skill, value: 100 }));
   }, [studentResult]);
 
-  const hrSkillDistribution = useMemo(() => {
-    const counts = new Map();
-    hrAllResults.forEach(r => {
+const hrSkillDistribution = useMemo(() => {
+  const counts = new Map();
+
+  hrAllResults.forEach(r => {
+    // Handle the 'top' field (used in HR Tools tab)
+    if (Array.isArray(r.top)) {
       r.top.forEach(t => counts.set(t.skill, (counts.get(t.skill) || 0) + 1));
-    });
-    return Array.from(counts.entries()).map(([name, value]) => ({ name, value }));
-  }, [hrAllResults]);
+    }
+
+    // Handle the 'candidates' field (used for dashboard upload summary)
+    if (Array.isArray(r.candidates)) {
+      r.candidates.forEach(c => {
+        if (Array.isArray(c.matched_skills)) {
+          c.matched_skills.forEach(skill =>
+            counts.set(skill, (counts.get(skill) || 0) + 1)
+          );
+        }
+      });
+    }
+  });
+
+  return Array.from(counts.entries()).map(([name, value]) => ({ name, value }));
+}, [hrAllResults]);
+
 
   const pieColors = ['#3B82F6','#22C55E','#F59E0B','#EF4444','#8B5CF6','#06B6D4','#84CC16','#F472B6'];
+
+  // Filter items based on search term
+  const filteredItems = useMemo(() => {
+    if (!searchTerm) return dashboardData.items;
+    
+    const term = searchTerm.toLowerCase();
+    return dashboardData.items.filter(item => {
+      return (
+        item.title?.toLowerCase().includes(term) ||
+        item.company?.toLowerCase().includes(term) ||
+        item.location?.toLowerCase().includes(term) ||
+        item.skills?.some(skill => skill.toLowerCase().includes(term))
+      );
+    });
+  }, [searchTerm, dashboardData.items]);
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -258,7 +418,7 @@ export default function Dashboard() {
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
           <div className="mb-6">
             <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-              {mockData.headerGreeting}{user?.name ? `, ${user.name}` : ''}
+              {dashboardData.headerGreeting}{currentUser?.name ? `, ${currentUser.name}` : ''}
             </h1>
             <p className="text-gray-600 dark:text-gray-400 mt-2">
               {isHR ? 'Upload and rank fresher resumes. Manage candidates and roles.' : 'Search jobs by skill or upload your resume to see fit and gaps.'}
@@ -268,12 +428,17 @@ export default function Dashboard() {
           {/* Role-based tabs */}
           <div className="border-b border-gray-200 dark:border-gray-700">
             <nav className="flex space-x-8 px-0">
-              {mockData.tabs.map((tab) => {
+              {dashboardData.tabs.map((tab) => {
                 const Icon = tab.icon;
                 return (
                   <button
                     key={tab.id}
-                    onClick={() => setActiveTab(tab.id)}
+                    onClick={() => {
+                      setActiveTab(tab.id);
+                          if (tab.id !== 'tools') {
+                            setHrResults([]);
+                          }
+                    }}
                     className={cn(
                       'flex items-center space-x-2 py-3 px-1 border-b-2 font-medium text-sm transition-colors',
                       activeTab === tab.id
@@ -292,7 +457,7 @@ export default function Dashboard() {
 
         {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          {mockData.stats.map((stat, index) => {
+          {dashboardData.stats.map((stat, index) => {
             const Icon = stat.icon;
             return (
               <Card key={index}>
@@ -336,10 +501,20 @@ export default function Dashboard() {
 
               {/* List */}
               <Card>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">{mockData.listTitle}</h3>
-                <div className="space-y-4">
-                  {mockData.items.map((item, index) => (
-                    <div key={item.id} className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                    {dashboardData.listTitle}
+                  </h3>
+                  <div
+                    className="space-y-4 max-h-96 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 
+                              dark:scrollbar-thumb-gray-600 scrollbar-track-transparent hover:scrollbar-thumb-gray-400 
+                              dark:hover:scrollbar-thumb-gray-500"
+                  >
+                    {filteredItems.slice(0, isHR ? filteredItems.length : 4).map((item, index) => (
+                      <div
+                        key={item.id}
+                        className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 hover:bg-gray-100 
+                                  dark:hover:bg-gray-600 transition-colors"
+                      >
                       <div className="flex items-start justify-between">
                         <div className="flex-1">
                           <div className="flex items-center space-x-3 mb-2">
@@ -358,7 +533,9 @@ export default function Dashboard() {
                           </div>
                         </div>
                         <div className="text-right ml-4">
-                          <div className={cn('text-2xl font-bold', getScoreColor(item.matchScore))}>{item.matchScore}%</div>
+                        <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                          {item.matchScore}%
+                        </div>
                           <div className="text-sm text-gray-500 dark:text-gray-400">Match Score</div>
                         </div>
                       </div>
@@ -463,105 +640,378 @@ export default function Dashboard() {
 
           {activeTab === 'tools' && isHR && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-              {/* HR Tools */}
+              {/* HR Tools - ML Resume Matcher */}
               <Card>
-                <h4 className="font-semibold text-gray-900 dark:text-white mb-3">Bulk Upload Fresher Resumes (5–20)</h4>
-                <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
-                  <Upload className="w-6 h-6 text-gray-500 mb-2" />
-                  <span className="text-sm text-gray-600 dark:text-gray-300">Select multiple files (.pdf, .docx, .txt)</span>
-                  <input type="file" accept=".pdf,.doc,.docx,.txt" multiple onChange={onHrFiles} className="hidden" />
-                </label>
-                {hrError && <p className="mt-2 text-sm text-red-600">{hrError}</p>}
-                {!!hrFiles.length && (
-                  <p className="mt-2 text-sm text-gray-600 dark:text-gray-300">Selected: {hrFiles.length} files</p>
-                )}
+                <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-6">ML Resume Matcher</h4>
+
+                {/* First row: Job Role, Required Skills, Top N Candidates */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-5">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Job Role *</label>
+                    <input
+                      type="text"
+                      value={jobRole}
+                      onChange={(e) => setJobRole(e.target.value)}
+                      placeholder="e.g., Senior Python Developer"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Required Skills (comma separated)</label>
+                    <input
+                      type="text"
+                      value={requiredSkills}
+                      onChange={(e) => setRequiredSkills(e.target.value)}
+                      placeholder="e.g., python, django, aws"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Top N Candidates</label>
+                    <input
+                      type="number"
+                      value={topN}
+                      onChange={(e) => setTopN(e.target.value)}
+                      min="1"
+                      max="20"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                {/* Second row: Min Education, Min Experience */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Min Education</label>
+                    <select
+                      value={minEducation}
+                      onChange={(e) => setMinEducation(e.target.value)}
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    >
+                      <option value="0">Any</option>
+                      <option value="2">Diploma</option>
+                      <option value="3">Bachelor's</option>
+                      <option value="4">Master's</option>
+                      <option value="5">PhD</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Min Experience (years)</label>
+                    <input
+                      type="number"
+                      value={minExperience}
+                      onChange={(e) => setMinExperience(e.target.value)}
+                      min="0"
+                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="mb-6">
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Job Description *</label>
+                  <textarea
+                    value={jobDescription}
+                    onChange={(e) => setJobDescription(e.target.value)}
+                    placeholder="Describe the job role, requirements, and responsibilities..."
+                    rows={4}
+                    className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white dark:bg-gray-700 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-gray-500 resize-vertical"
+                  />
+                </div>
+
+                {/* Upload Section */}
+                <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-6 border border-gray-200 dark:border-gray-600">
+                  <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+                    Upload Resumes (5–20 files)
+                  </h4>
+                  <label className="flex flex-col items-center justify-center h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
+                    <Upload className="w-6 h-6 text-gray-500 dark:text-gray-400 mb-2" />
+                    <span className="text-sm text-gray-600 dark:text-gray-300">Select multiple files (.pdf, .docx)</span>
+                    <input type="file" accept=".pdf,.doc,.docx" multiple onChange={onHrFiles} className="hidden" />
+                  </label>
+                  {!!hrFiles.length && (
+                    <p className="mt-2 text-sm text-green-600 dark:text-green-400 font-medium">
+                      ✓ Selected: {hrFiles.length} files
+                    </p>
+                  )}
+                  {hrError && <p className="mt-2 text-sm text-red-600 dark:text-red-400">{hrError}</p>}
+
+                  {/* Rank Button */}
+                  <button
+                    onClick={async () => {
+                      if (hrFiles.length < 5 || hrFiles.length > 20) {
+                        setHrError('Please upload between 5 and 20 resumes');
+                        return;
+                      }
+                      if (!jobRole || !jobDescription) {
+                        setHrError('Job role and description are required');
+                        return;
+                      }
+
+                      setIsProcessing(true);
+                      setHrError('');
+                      try {
+                        const token = localStorage.getItem('token');
+                        const formData = new FormData();
+                        hrFiles.forEach((file) => formData.append('files', file));
+                        formData.append('jobRole', jobRole);
+                        formData.append('jobDescription', jobDescription);
+                        formData.append('requiredSkills', requiredSkills);
+                        formData.append('minEducation', minEducation);
+                        formData.append('minExperience', minExperience);
+                        formData.append('topN', topN);
+
+                        const res = await fetch('http://localhost:3000/api/match-resumes', {
+                          method: 'POST',
+                          headers: { Authorization: `Bearer ${token}` },
+                          body: formData,
+                        });
+
+                        if (!res.ok) {
+                          const err = await res.json();
+                          throw new Error(err.message || 'Failed to process resumes');
+                        }
+
+                        const data = await res.json();
+                        setHrResults(data.results?.top_candidates || []);
+                        setHrAllResults(data.results?.all_candidates || []);
+
+                        // ✅ NEW: Reload dashboard data after successful upload
+                        const stats = await dashboardAPI.getStats();
+                        setDashboardStats(stats);
+
+                        const history = await resumeAPI.getUploadHistory();
+                        setUploadHistory(history);
+
+                        // Fetch candidates for the new upload
+                        const newUploadId = data.uploadId;
+                        if (newUploadId) {
+                          const candidateRes = await fetch(`http://localhost:3000/api/candidates/${newUploadId}`, {
+                            headers: { Authorization: `Bearer ${token}` },
+                          });
+                          if (candidateRes.ok) {
+                            const candidateData = await candidateRes.json();
+                            setHrAllResults(prev => [...prev, { uploadId: newUploadId, candidates: candidateData.candidates }]);
+                          }
+                        }
+
+                        // Clear form after success
+                        setJobRole('');
+                        setJobDescription('');
+                        setRequiredSkills('');
+                        setHrFiles([]);
+                        
+                      } catch (err) {
+                        setHrError(err.message);
+                      } finally {
+                        setIsProcessing(false);
+                      }
+                    }}
+                      disabled={isProcessing}
+                      className={cn(
+                        "mt-4 w-full py-3 px-6 rounded-lg text-white font-semibold text-base transition-colors flex items-center justify-center gap-2",
+                        isProcessing 
+                          ? "bg-gray-400 dark:bg-gray-600 cursor-not-allowed" 
+                          : "bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 cursor-pointer"
+                      )}
+                  >
+                    {isProcessing ? 'Processing...' : 'Rank Candidates'}
+                  </button>
+                </div>
               </Card>
 
+              {/* ML Results Display */}
               {hrResults.length > 0 && (
                 <Card>
-                  <h5 className="font-medium text-gray-900 dark:text-white mb-4">Top 5 Resumes by Score</h5>
+                  <h5 className="font-medium text-gray-900 dark:text-white mb-4">
+                    Top {hrResults.length} Candidates (ML Results)
+                  </h5>
                   <div className="space-y-4">
-                    {hrResults.map((r, idx) => (
-                      <div key={idx} className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4">
-                        <div className="flex items-start justify-between">
-                          <div>
-                            <div className="font-semibold text-gray-900 dark:text-white flex items-center">
-                              <FileText className="w-4 h-4 mr-2" /> {r.name}
+                    {hrResults.map((candidate, idx) => (
+                      <div
+                        key={idx}
+                        className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 hover:bg-gray-100 dark:hover:bg-gray-600 transition"
+                      >
+                        <div className="flex items-start justify-between flex-wrap gap-4">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-3 mb-2">
+                              <div
+                                className="w-8 h-8 flex items-center justify-center rounded-full font-bold text-white"
+                                style={{ background: colors.primary }}
+                              >
+                                #{idx + 1}
+                              </div>
+                              <div className="flex items-center gap-2 text-gray-900 dark:text-white font-semibold">
+                                <FileText className="w-4 h-4" /> {candidate.filename}
+                              </div>
                             </div>
-                            <div className="mt-2 flex flex-wrap gap-2">
-                              {r.top.map((t, i) => (
-                                <span key={i} className="px-2 py-1 bg-blue-100 dark:bg-blue-900/20 text-blue-800 dark:text-blue-400 text-xs rounded-md">{t.skill} • {t.percent}%</span>
-                              ))}
+
+                            <div className="grid grid-cols-3 gap-4 mb-3">
+                              <div>
+                                <p className="text-xs text-gray-500">Overall Score</p>
+                                <p className="text-lg font-bold text-green-600 dark:text-green-400">
+                                  {candidate.score}%
+                                </p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-500">Semantic Match</p>
+                                <p className="text-lg font-bold text-blue-600">{candidate.semantic_score}%</p>
+                              </div>
+                              <div>
+                                <p className="text-xs text-gray-500">Feature Match</p>
+                                <p className="text-lg font-bold text-purple-600">{candidate.feature_score}%</p>
+                              </div>
+                            </div>
+
+                            {candidate.matched_skills?.length > 0 && (
+                              <div className="mb-2">
+                                <p className="text-xs text-gray-500 mb-1">Matched Skills:</p>
+                                <div className="flex flex-wrap gap-2">
+                                  {candidate.matched_skills.map((s, i) => (
+                                    <span
+                                      key={i}
+                                      className="px-2 py-1 bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400 text-xs rounded-md"
+                                    >
+                                      {s}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            <div className="flex gap-4 text-sm mt-2">
+                              <div className="flex items-center gap-1">
+                                {candidate.education_match ? (
+                                  <CheckCircle className="w-4 h-4 text-green-500" />
+                                ) : (
+                                  <XCircle className="w-4 h-4 text-red-500" />
+                                )}
+                                <span className="text-gray-700 dark:text-gray-300">Education</span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                {candidate.experience_match ? (
+                                  <CheckCircle className="w-4 h-4 text-green-500" />
+                                ) : (
+                                  <XCircle className="w-4 h-4 text-red-500" />
+                                )}
+                                <span className="text-gray-700 dark:text-gray-300">Experience</span>
+                              </div>
                             </div>
                           </div>
-                          <div className={cn('text-2xl font-bold', getScoreColor(r.score))}>{r.score}%</div>
                         </div>
                       </div>
                     ))}
                   </div>
                 </Card>
               )}
-
-              {hrAllResults.length > 0 && (
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                  <Card>
-                    <h5 className="font-medium text-gray-900 dark:text-white mb-4">Skill Distribution</h5>
-                    <div className="w-full h-64">
-                      <ResponsiveContainer>
-                        <PieChart>
-                          <Pie data={hrSkillDistribution} dataKey="value" nameKey="name" outerRadius={90} label>
-                            {hrSkillDistribution.map((entry, index) => (
-                              <Cell key={`cell-${index}`} fill={pieColors[index % pieColors.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </Card>
-                  <div className="lg:col-span-2">
-                    <Card>
-                      <h5 className="font-medium text-gray-900 dark:text-white mb-4">All Uploaded Resumes</h5>
-                      <div className="overflow-x-auto">
-                        <table className="min-w-full text-sm">
-                          <thead className="text-left text-gray-600 dark:text-gray-300">
-                            <tr>
-                              <th className="py-2 pr-4">Name</th>
-                              <th className="py-2 pr-4">Score</th>
-                              <th className="py-2 pr-4">Key Skills</th>
-                              <th className="py-2 pr-4">Suggested Role</th>
-                            </tr>
-                          </thead>
-                          <tbody className="text-gray-900 dark:text-white">
-                            {hrAllResults.map((r, i) => (
-                              <tr key={i} className="border-t border-gray-200 dark:border-gray-700">
-                                <td className="py-2 pr-4">{r.name}</td>
-                                <td className="py-2 pr-4 font-semibold">{r.score}%</td>
-                                <td className="py-2 pr-4">
-                                  <div className="flex flex-wrap gap-2">
-                                    {r.top.map((t, j) => (
-                                      <span key={j} className="px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 text-xs">{t.skill}</span>
-                                    ))}
-                                  </div>
-                                </td>
-                                <td className="py-2 pr-4">{r.suggested}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    </Card>
-                  </div>
-                </div>
-              )}
             </motion.div>
           )}
 
           {activeTab === 'candidates' && isHR && (
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="text-center py-12">
-              <Users className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-              <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">Candidates</h3>
-              <p className="text-gray-500 dark:text-gray-400">Browse and manage applicants for your open roles.</p>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
+              <h3 className="text-2xl font-semibold text-gray-900 dark:text-white mb-6">
+                Candidates by Job Role
+              </h3>
+
+              {uploadHistory.length === 0 ? (
+                <div className="text-center py-12">
+                  <Users className="w-16 h-16 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">No Uploads Yet</h3>
+                  <p className="text-gray-500 dark:text-gray-400">
+                    Upload resumes using the HR Tools tab to start viewing candidates here.
+                  </p>
+                </div>
+              ) : (
+                uploadHistory.map((upload) => {
+                  const roleCandidates =
+                    hrAllResults.find((r) => r.uploadId === upload.id)?.candidates || [];
+                  const isOpen = openDropdowns[upload.id] || false;
+
+                  return (
+                    <Card key={upload.id} className="p-0 overflow-hidden shadow-md border border-gray-200 dark:border-gray-700 rounded-xl">
+                      {/* Header */}
+                      <button
+                        onClick={() => toggleDropdown(upload.id)}
+                        className="w-full flex items-center justify-between px-6 py-4 bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 transition"
+                      >
+                        <div>
+                          <h4 className="text-lg font-semibold text-gray-900 dark:text-white">
+                            {upload.job_role}
+                          </h4>
+                          <p className="text-sm text-gray-500 dark:text-gray-400">
+                            Uploaded on {new Date(upload.upload_date).toLocaleDateString()} —{" "}
+                            {upload.total_resumes} resumes processed
+                          </p>
+                        </div>
+                        <span className="text-gray-500 dark:text-gray-400 font-medium text-sm">
+                          {isOpen ? "▲ Hide" : "▼ Show"}
+                        </span>
+                      </button>
+
+                      {/* Dropdown Body */}
+                      <motion.div
+                        initial={{ height: 0, opacity: 0 }}
+                        animate={{
+                          height: isOpen ? "auto" : 0,
+                          opacity: isOpen ? 1 : 0,
+                        }}
+                        transition={{ duration: 0.3, ease: "easeInOut" }}
+                        className="overflow-hidden"
+                      >
+                        {isOpen && (
+                          <div
+                            className="max-h-72 overflow-y-auto px-6 py-4 border-t border-gray-200 dark:border-gray-700 
+                                      scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600 
+                                      scrollbar-track-transparent hover:scrollbar-thumb-gray-400 
+                                      dark:hover:scrollbar-thumb-gray-500"
+                          >
+                            {roleCandidates.length > 0 ? (
+                              roleCandidates.map((c, i) => (
+                                <div
+                                  key={i}
+                                  className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 mb-3 
+                                            hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors"
+                                >
+                                  <div className="flex items-start justify-between">
+                                    <div>
+                                      <div className="font-medium text-gray-900 dark:text-white">
+                                        {c.filename}
+                                      </div>
+                                      <div className="text-sm text-gray-500 dark:text-gray-400">
+                                        Rank #{c.rank_position} • Score:{" "}
+                                        <span className="font-semibold text-blue-600 dark:text-blue-400">
+                                          {parseFloat(c.score).toFixed(2)}%
+                                        </span>
+                                      </div>
+
+                                      {c.matched_skills?.length > 0 && (
+                                        <div className="mt-2 flex flex-wrap gap-2">
+                                          {c.matched_skills.slice(0, 5).map((skill, j) => (
+                                            <span
+                                              key={j}
+                                              className="px-2 py-1 bg-green-100 dark:bg-green-900/20 
+                                                        text-green-700 dark:text-green-400 text-xs rounded-md"
+                                            >
+                                              {skill}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))
+                            ) : (
+                              <p className="text-gray-500 dark:text-gray-400 text-sm">
+                                No candidates found for this role yet.
+                              </p>
+                            )}
+                          </div>
+                        )}
+                      </motion.div>
+                    </Card>
+                  );
+                })
+              )}
             </motion.div>
           )}
 
