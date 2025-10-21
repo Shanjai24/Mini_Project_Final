@@ -85,12 +85,13 @@ async function startServer() {
   `);
   console.log('✅ Ensured resume_uploads table exists');
 
-  // Create candidates table
+  // Create candidates table with candidate_name column
   await pool.query(`
     CREATE TABLE IF NOT EXISTS candidates (
       id INT AUTO_INCREMENT PRIMARY KEY,
       upload_id INT NOT NULL,
       filename VARCHAR(255) NOT NULL,
+      candidate_name VARCHAR(255),
       score DECIMAL(5,2) NOT NULL,
       semantic_score DECIMAL(5,2),
       feature_score DECIMAL(5,2),
@@ -100,7 +101,7 @@ async function startServer() {
       FOREIGN KEY (upload_id) REFERENCES resume_uploads(id) ON DELETE CASCADE
     )
   `);
-  console.log('✅ Ensured candidates table exists');
+  console.log('✅ Ensured candidates table exists with candidate_name field');
 
   app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
@@ -203,32 +204,44 @@ app.delete('/api/delete-account', authenticateToken, async (req, res) => {
   }
 });
 
-// NEW: Resume upload and ML matching endpoint
+// ✅ FIXED: Resume upload and ML matching endpoint
 app.post('/api/match-resumes', authenticateToken, upload.array('files', 20), async (req, res) => {
   try {
     const { userId } = req.user;
     const { jobRole, jobDescription, requiredSkills, minEducation, minExperience, topN } = req.body;
     const files = req.files;
 
+    console.log('📁 Received files:', files?.length);
+
     // Validate input
     if (!files || files.length < 5 || files.length > 20) {
       // Clean up uploaded files
-      files?.forEach(file => fs.unlinkSync(file.path));
+      files?.forEach(file => {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (err) {}
+      });
       return res.status(400).json({ message: 'Please upload between 5 and 20 resumes' });
     }
 
     if (!jobRole || !jobDescription) {
-      files.forEach(file => fs.unlinkSync(file.path));
+      files.forEach(file => {
+        try {
+          fs.unlinkSync(file.path);
+        } catch (err) {}
+      });
       return res.status(400).json({ message: 'Job role and description are required' });
     }
 
     // Prepare data for ML API
     const formData = new FormData();
-    
-    // Append files
     files.forEach(file => {
-      formData.append('files', fs.createReadStream(file.path), file.originalname);
+      const fileBuffer = fs.readFileSync(file.path);
+      formData.append('files', fileBuffer, {
+      filename: file.originalname,
+      contentType: file.mimetype
     });
+  });
 
     // Prepare job requirements
     const jobRequirements = {
@@ -242,18 +255,23 @@ app.post('/api/match-resumes', authenticateToken, upload.array('files', 20), asy
     formData.append('top_n', topN || 5);
 
     // Call ML API
-    console.log('Calling ML API...');
+    console.log('🚀 Calling ML API at:', `${ML_API_URL}/api/match-resumes`);
     const mlResponse = await fetch(`${ML_API_URL}/api/match-resumes`, {
       method: 'POST',
       body: formData,
       headers: formData.getHeaders()
     });
 
+    console.log('📡 ML API Response Status:', mlResponse.status);
+
     if (!mlResponse.ok) {
+      const errorText = await mlResponse.text();
+      console.error('❌ ML API error response:', errorText);
       throw new Error(`ML API error: ${mlResponse.statusText}`);
     }
 
     const mlResults = await mlResponse.json();
+    console.log('✅ ML Results received:', mlResults);
 
     // Save to database
     const [uploadResult] = await pool.query(
@@ -264,20 +282,21 @@ app.post('/api/match-resumes', authenticateToken, upload.array('files', 20), asy
 
     const uploadId = uploadResult.insertId;
 
-    // Save top candidates
+    // Save top candidates with candidate_name
     for (let i = 0; i < mlResults.top_candidates.length; i++) {
       const candidate = mlResults.top_candidates[i];
       await pool.query(
-        `INSERT INTO candidates (upload_id, filename, score, semantic_score, feature_score, matched_skills, rank_position)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO candidates (upload_id, filename, candidate_name, score, semantic_score, feature_score, matched_skills, rank_position)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           uploadId,
           candidate.filename,
+          candidate.candidate_name || 'Unknown Candidate',  // ✅ ADD THIS
           candidate.score,
           candidate.semantic_score,
           candidate.feature_score,
-          JSON.stringify(candidate.matched_skills),
-          i + 1
+          JSON.stringify(candidate.matched_skills || []),
+          candidate.rank_position || 0
         ]
       );
     }
@@ -291,6 +310,8 @@ app.post('/api/match-resumes', authenticateToken, upload.array('files', 20), asy
       }
     });
 
+    console.log('✅ Successfully processed and saved candidates');
+
     return res.json({
       success: true,
       uploadId: uploadId,
@@ -298,7 +319,7 @@ app.post('/api/match-resumes', authenticateToken, upload.array('files', 20), asy
     });
 
   } catch (error) {
-    console.error('Match resumes error:', error);
+    console.error('❌ Match resumes error:', error);
     // Clean up files on error
     if (req.files) {
       req.files.forEach(file => {
@@ -311,7 +332,7 @@ app.post('/api/match-resumes', authenticateToken, upload.array('files', 20), asy
   }
 });
 
-// FIXED: Get user's upload history - changed from db.query to pool.query
+// Get user's upload history
 app.get("/api/upload-history", authenticateToken, async (req, res) => {
   try {
     const { userId } = req.user;
@@ -406,5 +427,4 @@ app.get('/api/dashboard-stats', authenticateToken, async (req, res) => {
     return res.status(500).json({ message: 'Internal server error' });
   }
 });
-
 startServer();

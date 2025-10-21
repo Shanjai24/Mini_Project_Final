@@ -1,7 +1,7 @@
 # feature_extractor.py
 """
 NLP-based feature extraction from resumes.
-Extracts skills, education, experience, and other relevant information.
+Extracts skills, education, experience, contact info, and candidate names.
 """
 
 import re
@@ -47,10 +47,46 @@ class FeatureExtractor:
                 "database": ["mysql", "postgresql", "mongodb", "redis", "cassandra", "oracle", "sql", "nosql"],
                 "cloud": ["aws", "azure", "gcp", "docker", "kubernetes", "jenkins", "terraform", "ansible"],
                 "data_science": ["machine learning", "deep learning", "nlp", "computer vision", "tensorflow", "pytorch", "scikit-learn", "pandas", "numpy"],
-                "mobile": ["android", "ios", "react native", "flutter", "swift", "kotlin"],
+                "mobile": ["android", "ios", "react native", "flutter", "swift", "kotlin", "xamarin"],
                 "tools": ["git", "jira", "confluence", "postman", "swagger", "linux", "agile", "scrum"],
                 "soft_skills": ["leadership", "communication", "teamwork", "problem solving", "analytical", "critical thinking"]
             }
+    
+    def extract_name(self, text: str) -> str:
+        """
+        Extract candidate name from resume text.
+        Uses multiple strategies to find the most likely name.
+        """
+        # Strategy 1: Look for name in first 500 characters (usually at top)
+        doc = nlp(text[:500])
+        
+        # Get all PERSON entities
+        person_entities = [ent.text for ent in doc.ents if ent.label_ == "PERSON"]
+        
+        if person_entities:
+            # Return the first person name found (usually the candidate's name)
+            name = person_entities[0].strip()
+            # Clean up the name
+            name = re.sub(r'\s+', ' ', name)
+            return name
+        
+        # Strategy 2: Look for common name patterns in first few lines
+        lines = text.split('\n')[:10]
+        for line in lines:
+            line = line.strip()
+            # Look for lines that are 2-4 words, capitalized, and not too long
+            words = line.split()
+            if 2 <= len(words) <= 4 and len(line) < 50:
+                # Check if it looks like a name (all words capitalized)
+                if all(word[0].isupper() for word in words if word):
+                    # Avoid common resume section headers
+                    if not any(keyword in line.lower() for keyword in 
+                              ['resume', 'curriculum', 'vitae', 'profile', 'summary', 
+                               'objective', 'contact', 'education', 'experience']):
+                        return line
+        
+        # Strategy 3: Fallback - return "Candidate" + resume number
+        return "Unknown Candidate"
     
     def extract_skills(self, text: str) -> Dict[str, List[str]]:
         """Extract technical and soft skills from text."""
@@ -124,24 +160,31 @@ class FeatureExtractor:
     def extract_all_features(self, text: str) -> Dict:
         """Extract all features from resume text."""
         return {
+            'name': self.extract_name(text),
             'skills': self.extract_skills(text),
             'education': self.extract_education(text),
             'experience': self.extract_experience(text),
-            'contact': self.extract_contact_info(text),
-            'text_length': len(text),
-            'word_count': len(text.split())
+            'contact': self.extract_contact_info(text)
         }
     
-    def process_batch(self, resume_data: List[Dict]) -> List[Dict]:
+    def process_batch(self, parsed_resumes: List[Dict]) -> List[Dict]:
         """Process multiple resumes and extract features."""
         results = []
         
-        for resume in resume_data:
+        for resume in parsed_resumes:
+            if resume['status'] != 'success':
+                continue
+            
             features = self.extract_all_features(resume['cleaned_text'])
+            
             results.append({
                 'id': resume['id'],
                 'filename': resume['filename'],
-                'features': features
+                'name': features['name'],  # ✅ Added name field
+                'skills': features['skills'],
+                'education': features['education'],
+                'experience': features['experience'],
+                'contact': features['contact']
             })
         
         return results
@@ -151,18 +194,18 @@ class FeatureExtractor:
 if __name__ == "__main__":
     extractor = FeatureExtractor()
     
+    # Test name extraction
     sample_text = """
-    John Doe | john.doe@email.com | 555-123-4567
+    John Michael Smith
+    Senior Software Engineer
+    john.smith@email.com | +1-555-123-4567
     
-    Software Engineer with 5 years of experience in Python and machine learning.
-    Master's degree in Computer Science from MIT.
-    
-    Skills: Python, TensorFlow, Docker, AWS, React, PostgreSQL
-    
-    Experience:
-    - Senior Developer at Google (3 years)
-    - ML Engineer at Facebook (2 years)
+    PROFESSIONAL SUMMARY
+    Experienced software engineer with 5+ years of experience...
     """
     
+    name = extractor.extract_name(sample_text)
+    print(f"Extracted name: {name}")
+    
     features = extractor.extract_all_features(sample_text)
-    print(json.dumps(features, indent=2))
+    print(f"All features: {features}")

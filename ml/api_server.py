@@ -12,6 +12,7 @@ import tempfile
 import os
 import json
 from pathlib import Path
+import logging
 
 # Import our custom modules
 from resume_parser import ResumeParser
@@ -34,6 +35,10 @@ parser = ResumeParser()
 extractor = FeatureExtractor()
 matcher = ResumeJobMatcher()
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 
 # Pydantic models
 class JobRequirements(BaseModel):
@@ -52,6 +57,7 @@ class MatchRequest(BaseModel):
 class CandidateResult(BaseModel):
     id: int
     filename: str
+    candidate_name: str  # ✅ NEW: Add candidate name field
     score: float
     semantic_score: float
     feature_score: float
@@ -97,99 +103,112 @@ async def match_resumes(
         Ranked list of top N candidates with match scores
     """
     
-    # Validate number of files
-    if len(files) < 5 or len(files) > 20:
-        raise HTTPException(
-            status_code=400,
-            detail="Please upload between 5 and 20 resume files"
-        )
-    
-    # Parse job requirements
     try:
-        job_reqs_dict = json.loads(job_requirements)
-        job_reqs = JobRequirements(**job_reqs_dict)
-    except Exception as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid job requirements format: {str(e)}"
-        )
-    
-    # Create temporary directory for uploaded files
-    with tempfile.TemporaryDirectory() as temp_dir:
-        file_paths = []
-        original_filenames = []
+        # Validate input
+        if not files:
+            raise HTTPException(status_code=400, detail="No files uploaded")
         
-        # Save uploaded files and preserve original filenames
-        for idx, file in enumerate(files):
-            file_ext = Path(file.filename).suffix
-            if file_ext.lower() not in ['.pdf', '.docx', '.doc']:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Unsupported file format: {file.filename}"
-                )
-            
-            temp_path = os.path.join(temp_dir, f"resume_{idx}{file_ext}")
-            with open(temp_path, "wb") as f:
-                content = await file.read()
-                f.write(content)
-            file_paths.append(temp_path)
-            original_filenames.append(file.filename)  # Store original filename
+        if not job_description:
+            raise HTTPException(status_code=400, detail="Job description is required")
         
-        # Step 1: Parse resumes
-        parsed_resumes = parser.parse_batch(file_paths)
-        
-        # Replace temp filenames with original filenames
-        for idx, resume in enumerate(parsed_resumes):
-            if idx < len(original_filenames):
-                resume['filename'] = original_filenames[idx]
-        
-        # Filter out failed parses
-        valid_resumes = [r for r in parsed_resumes if r['status'] == 'success']
-        
-        if not valid_resumes:
+        # Validate number of files
+        if len(files) < 5 or len(files) > 20:
             raise HTTPException(
                 status_code=400,
-                detail="Failed to parse any resumes. Please check file formats."
+                detail="Please upload between 5 and 20 resume files"
             )
         
-        # Step 2: Extract features
-        candidates_with_features = extractor.process_batch(valid_resumes)
-        
-        # Step 3: Match and rank candidates
-        job_reqs_dict = {
-            'required_skills': job_reqs.required_skills,
-            'min_education_level': job_reqs.min_education_level,
-            'min_experience': job_reqs.min_experience
-        }
-        
-        top_candidates = matcher.rank_candidates(
-            candidates_with_features,
-            job_description,
-            job_reqs_dict,
-            top_n
-        )
-        
-        # Format response
-        candidate_results = [
-            CandidateResult(
-                id=c['id'],
-                filename=c['filename'],
-                score=c['score'],
-                semantic_score=c['semantic_score'],
-                feature_score=c['feature_score'],
-                matched_skills=c['breakdown']['matched_skills'],
-                education_match=c['breakdown']['education_match'],
-                experience_match=c['breakdown']['experience_match']
+        # Parse job requirements
+        try:
+            job_reqs_dict = json.loads(job_requirements)
+            job_reqs = JobRequirements(**job_reqs_dict)
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid job requirements format: {str(e)}"
             )
-            for c in top_candidates
-        ]
         
-        return MatchResponse(
-            success=True,
-            total_resumes=len(valid_resumes),
-            top_candidates=candidate_results,
-            message=f"Successfully ranked {len(valid_resumes)} candidates"
-        )
+        # Create temporary directory for uploaded files
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_paths = []
+            original_filenames = []
+            
+            # Save uploaded files and preserve original filenames
+            for idx, file in enumerate(files):
+                file_ext = Path(file.filename).suffix
+                if file_ext.lower() not in ['.pdf', '.docx', '.doc']:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Unsupported file format: {file.filename}"
+                    )
+                
+                temp_path = os.path.join(temp_dir, f"resume_{idx}{file_ext}")
+                with open(temp_path, "wb") as f:
+                    content = await file.read()
+                    f.write(content)
+                file_paths.append(temp_path)
+                original_filenames.append(file.filename)  # Store original filename
+            
+            # Step 1: Parse resumes
+            parsed_resumes = parser.parse_batch(file_paths)
+            
+            # Replace temp filenames with original filenames
+            for idx, resume in enumerate(parsed_resumes):
+                if idx < len(original_filenames):
+                    resume['filename'] = original_filenames[idx]
+            
+            # Filter out failed parses
+            valid_resumes = [r for r in parsed_resumes if r['status'] == 'success']
+            
+            if not valid_resumes:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Failed to parse any resumes. Please check file formats."
+                )
+            
+            # Step 2: Extract features
+            candidates_with_features = extractor.process_batch(valid_resumes)
+            
+            # Step 3: Match and rank candidates
+            job_reqs_dict = {
+                'required_skills': job_reqs.required_skills,
+                'min_education_level': job_reqs.min_education_level,
+                'min_experience': job_reqs.min_experience
+            }
+            
+            top_candidates = matcher.rank_candidates(
+                candidates_with_features,
+                job_description,
+                job_reqs_dict,
+                top_n
+            )
+            
+            # Format response
+            candidate_results = [
+    CandidateResult(
+        id=c['id'],
+        filename=c['filename'],
+        candidate_name=c.get('candidate_name', 'Unknown Candidate'),  # ✅ NEW
+        score=c['score'],
+        semantic_score=c['semantic_score'],
+        feature_score=c['feature_score'],
+        matched_skills=c['breakdown']['matched_skills'],
+        education_match=c['breakdown']['education_match'],
+        experience_match=c['breakdown']['experience_match']
+    )
+    for c in top_candidates
+]
+            
+            return MatchResponse(
+                success=True,
+                total_resumes=len(valid_resumes),
+                top_candidates=candidate_results,
+                message=f"Successfully ranked {len(valid_resumes)} candidates"
+            )
+    
+    except Exception as e:
+        logger.error(f"Error processing resumes: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/parse-single-resume")
