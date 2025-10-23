@@ -392,46 +392,25 @@ async def analyze_student_resume(file: UploadFile = File(...)):
         best_role_name = max(all_roles.items(), key=lambda x: x[1]["match_percentage"])[0]
         best_role_data = all_roles[best_role_name]
         
-        # Generate recommendations
-        recommendations = []
         
-        if ats_score < 70:
-            recommendations.append("Improve resume formatting and structure for better ATS compatibility")
-        
-        if len(extracted_skills) < 10:
-            recommendations.append("Add more relevant technical skills to strengthen your profile")
-        
-        if best_role_data["match_percentage"] < 50:
-            recommendations.append(f"Consider learning key skills for {best_role_name}")
-        
-        if best_role_data["missing_skills"]:
-            top_missing = ', '.join(best_role_data["missing_skills"][:3])
-            recommendations.append(f"Focus on acquiring these in-demand skills: {top_missing}")
-        
-        if ats_score >= 80:
-            recommendations.append("Your resume is well-optimized! Consider adding quantifiable achievements")
-        
-        recommendations.append("Tailor your resume for specific job descriptions to improve match scores")
         
         # Clean up temp file
         if temp_path and os.path.exists(temp_path):
             os.remove(temp_path)
         
         return {
-            "candidate_name": candidate_name,
-            "ats_score": ats_score,
-            "extracted_skills": extracted_skills[:30],  # ✅ Now safe to slice
-            "best_role": {
-                "role": best_role_name,
-                "match_percentage": best_role_data["match_percentage"],
-                "matched_count": best_role_data["matched_count"],
-                "total_required": best_role_data["total_required"],
-                "matched_skills": best_role_data["matched_skills"],
-                "missing_skills": best_role_data["missing_skills"],
-                "all_roles": all_roles
-            },
-            "recommendations": recommendations[:5]
-        }
+    "candidate_name": candidate_name,
+    "ats_score": ats_score,
+    "extracted_skills": extracted_skills[:30],
+    "best_role": {
+        "role": best_role_name,
+        "match_percentage": best_role_data["match_percentage"],
+        "matched_count": best_role_data["matched_count"],
+        "total_required": best_role_data["total_required"],
+        "matched_skills": best_role_data["matched_skills"],
+        "missing_skills": best_role_data["missing_skills"]
+    }
+}
         
     except Exception as e:
         logger.error(f"Error analyzing student resume: {str(e)}")
