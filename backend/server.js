@@ -427,4 +427,77 @@ app.get('/api/dashboard-stats', authenticateToken, async (req, res) => {
     return res.status(500).json({ message: 'Internal server error' });
   }
 });
+
+// ✅ ADD THIS: Student resume analysis endpoint
+app.post('/api/analyze-student-resume', upload.single('file'), async (req, res) => {
+  try {
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({ message: 'No file uploaded' });
+    }
+
+    console.log('📄 Analyzing student resume:', file.originalname);
+
+    // Prepare data for ML API
+    const formData = new FormData();
+    const fileBuffer = fs.readFileSync(file.path);
+    formData.append('file', fileBuffer, {
+      filename: file.originalname,
+      contentType: file.mimetype
+    });
+
+    // Call ML API for student resume analysis
+    console.log('🚀 Calling ML API at:', `${ML_API_URL}/api/analyze-student-resume`);
+    const mlResponse = await fetch(`${ML_API_URL}/api/analyze-student-resume`, {
+      method: 'POST',
+      body: formData,
+      headers: formData.getHeaders()
+    });
+
+    console.log('📡 ML API Response Status:', mlResponse.status);
+
+    if (!mlResponse.ok) {
+      const errorText = await mlResponse.text();
+      console.error('❌ ML API error response:', errorText);
+      
+      // Clean up uploaded file
+      try {
+        fs.unlinkSync(file.path);
+      } catch (err) {
+        console.error('Error deleting file:', err);
+      }
+      
+      throw new Error(`ML API error: ${mlResponse.statusText}`);
+    }
+
+    const mlResults = await mlResponse.json();
+    console.log('✅ ML Results received:', mlResults);
+
+    // Clean up uploaded file
+    try {
+      fs.unlinkSync(file.path);
+    } catch (err) {
+      console.error('Error deleting file:', err);
+    }
+
+    return res.json(mlResults);
+
+  } catch (error) {
+    console.error('❌ Student resume analysis error:', error);
+    
+    // Clean up file on error
+    if (req.file) {
+      try {
+        fs.unlinkSync(req.file.path);
+      } catch (err) {}
+    }
+    
+    return res.status(500).json({ 
+      message: 'Error analyzing resume', 
+      error: error.message 
+    });
+  }
+});
+
 startServer();

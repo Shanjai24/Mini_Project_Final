@@ -1,12 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { ResponsiveContainer, PieChart, Pie, Cell, Tooltip, BarChart as RBChart, Bar, XAxis, YAxis, RadialBarChart, RadialBar } from 'recharts';
-import { Upload, FileText, Users, BarChart3, TrendingUp, ClipboardList, Target, Briefcase, User, GraduationCap, Building2, MapPin, DollarSign, Filter, Search, Star, Plus, X, XCircle } from 'lucide-react';
+import { Upload, FileText, Users, BarChart3, TrendingUp, ClipboardList, Target, Briefcase, User, GraduationCap, Building2, MapPin, DollarSign, Filter, Search, Star, Plus, X, XCircle, CheckCircle } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { cn } from '../utils/cn';
 import { dashboardAPI, resumeAPI, getCurrentUser } from '../services/api';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle } from 'lucide-react';
 import { jobListings } from '../data/jobListings';
 
 const colors = {
@@ -75,26 +74,10 @@ const styles = {
   }
 };
 
-
-
 function Card({ children }) {
   return (
     <div className="bg-white dark:bg-gray-800 rounded-xl p-6 shadow-sm border border-gray-200 dark:border-gray-700">
       {children}
-    </div>
-  );
-}
-
-function ProgressBar({ label, percent, color = 'blue' }) {
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center justify-between text-sm">
-        <span className="text-gray-700 dark:text-gray-300">{label}</span>
-        <span className="text-gray-500 dark:text-gray-400">{percent}%</span>
-      </div>
-      <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-        <div className={cn('h-2 rounded-full', `bg-${color}-600`)} style={{ width: `${Math.min(100, Math.max(0, percent))}%` }} />
-      </div>
     </div>
   );
 }
@@ -115,6 +98,8 @@ export default function Dashboard() {
   const [studentSkills, setStudentSkills] = useState('');
   const [studentResumeName, setStudentResumeName] = useState('');
   const [studentResult, setStudentResult] = useState(null);
+  const [resumeAnalysisResult, setResumeAnalysisResult] = useState(null);
+  const [isAnalyzingResume, setIsAnalyzingResume] = useState(false);
 
   // HR tool state
   const [jobRole, setJobRole] = useState('');
@@ -189,7 +174,7 @@ const toggleDropdown = (id) => {
 
   useEffect(() => {
     if (!isHR) {
-      const topJobs = jobListings.sort((a, b) => b.matchScore - a.matchScore).slice(0, 200);
+      const topJobs = jobListings.sort((a, b) => b.matchScore - a.matchScore);
       setMatchedJobs(topJobs);
     }
   }, [isHR]);
@@ -355,21 +340,69 @@ const toggleDropdown = (id) => {
   }
 
   // ---- Student actions ----
-  const onStudentResume = async (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setStudentResumeName(file.name);
-    if (file.type === 'text/plain') {
-      const text = await file.text();
-      const result = analyzeStudent(studentSkills, text);
-      setStudentResult(result);
-    } else {
-      const result = analyzeStudent(studentSkills, file.name);
-      setStudentResult(result);
+const onStudentResume = async (e) => {
+  const file = e.target.files?.[0];
+  if (!file) return;
+  
+  // Validate file type
+  const validTypes = ['.pdf', '.doc', '.docx', '.txt'];
+  const fileExt = file.name.substring(file.name.lastIndexOf('.')).toLowerCase();
+  if (!validTypes.includes(fileExt)) {
+    alert('Please upload a valid resume file (.pdf, .docx, .txt)');
+    return;
+  }
+  
+  // Validate file size (e.g., 5MB limit)
+  if (file.size > 5 * 1024 * 1024) {
+    alert('File size must be less than 5MB');
+    return;
+  }
+  
+  setStudentResumeName(file.name);
+  setIsAnalyzingResume(true);
+  setResumeAnalysisResult(null); // Clear previous results
+  
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    const response = await fetch('http://localhost:8000/api/analyze-student-resume', {
+      method: 'POST',
+      body: formData
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      throw new Error(errorData?.message || `Server error: ${response.status}`);
     }
-  };
+    
+    const result = await response.json();
+    console.log('Resume analysis result:', result);
+    
+    setResumeAnalysisResult(result);
+    
+    const skillsText = result.extracted_skills.join(', ');
+    setStudentSkills(skillsText);
+    
+    const roleAnalysis = analyzeStudent(skillsText, '');
+    setStudentResult(roleAnalysis);
+    
+    const matched = matchJobsWithSkills(skillsText);
+    setMatchedJobs(matched);
+    
+  } catch (error) {
+    console.error('Error analyzing resume:', error);
+    alert(`Failed to analyze resume: ${error.message}`);
+    setStudentResumeName(''); // Clear the file name on error
+  } finally {
+    setIsAnalyzingResume(false);
+    // Reset file input
+    e.target.value = '';
+  }
+};
 
   const runStudentAnalysis = () => {
+    setResumeAnalysisResult(null); // ✅ ADD THIS LINE to clear resume analysis
     const result = analyzeStudent(studentSkills, '');
     setStudentResult(result);
     const matched = matchJobsWithSkills(studentSkills); 
@@ -644,8 +677,16 @@ const hrSkillDistribution = useMemo(() => {
                   <h4 className="font-semibold text-gray-900 dark:text-white mb-3">Upload Resume</h4>
                   <label className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
                     <Upload className="w-6 h-6 text-gray-500 mb-2" />
-                    <span className="text-sm text-gray-600 dark:text-gray-300">Click to upload (.pdf, .docx, .txt)</span>
-                    <input type="file" accept=".pdf,.doc,.docx,.txt" onChange={onStudentResume} className="hidden" />
+                    <span className="text-sm text-gray-600 dark:text-gray-300">
+                      {isAnalyzingResume ? 'Analyzing...' : 'Click to upload (.pdf, .docx, .txt)'}
+                    </span>
+                    <input 
+                      type="file" 
+                      accept=".pdf,.doc,.docx,.txt" 
+                      onChange={onStudentResume} 
+                      className="hidden" 
+                      disabled={isAnalyzingResume}  // ✅ ADD THIS
+                    />
                   </label>
                   {studentResumeName && (
                     <div className="mt-3 text-sm text-gray-600 dark:text-gray-300 flex items-center">
@@ -655,20 +696,114 @@ const hrSkillDistribution = useMemo(() => {
                 </Card>
               </div>
 
+              {resumeAnalysisResult && (
+                <div className="mt-4 space-y-3">
+                  <div className="bg-blue-50 dark:bg-blue-900/20 p-3 rounded-lg">
+                    <p className="text-sm font-medium text-blue-900 dark:text-blue-300">
+                      👤 Candidate: {resumeAnalysisResult.candidate_name}
+                    </p>
+                    <p className="text-sm text-blue-700 dark:text-blue-400 mt-1">
+                      📊 ATS Score: <span className="font-bold">{resumeAnalysisResult.ats_score}/100</span>
+                    </p>
+                    <p className="text-sm text-blue-700 dark:text-blue-400">
+                      💼 Best Fit: <span className="font-bold">{resumeAnalysisResult.best_role.role}</span>
+                    </p>
+                    <p className="text-sm text-blue-700 dark:text-blue-400">
+                      🎯 Match: <span className="font-bold">{resumeAnalysisResult.best_role.match_percentage}%</span>
+                    </p>
+                  </div>
+
+                  <div>
+                    <p className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      ✅ Extracted Skills ({resumeAnalysisResult.extracted_skills.length}):
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {resumeAnalysisResult.extracted_skills.slice(0, 10).map((skill, i) => (
+                        <span key={i} className="px-2 py-1 bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400 text-xs rounded-md">
+                          {skill}
+                        </span>
+                      ))}
+                      {resumeAnalysisResult.extracted_skills.length > 10 && (
+                        <span className="text-xs text-gray-500">
+                          +{resumeAnalysisResult.extracted_skills.length - 10} more
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {resumeAnalysisResult.best_role.missing_skills.length > 0 && (
+                    <div>
+                      <p className="text-xs font-medium text-red-700 dark:text-red-400 mb-2">
+                        ❌ Skills to Learn for {resumeAnalysisResult.best_role.role}:
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {resumeAnalysisResult.best_role.missing_skills.map((skill, i) => (
+                          <span key={i} className="px-2 py-1 bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-400 text-xs rounded-md">
+                            {skill}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {resumeAnalysisResult.recommendations && (
+                    <div className="bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded-lg">
+                      <p className="text-xs font-medium text-yellow-900 dark:text-yellow-300 mb-2">
+                        💡 Recommendations:
+                      </p>
+                      <ul className="text-xs text-yellow-800 dark:text-yellow-400 space-y-1">
+                        {resumeAnalysisResult.recommendations.map((rec, i) => (
+                          <li key={i}>• {rec}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {studentResult && (
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                   <Card>
-                    <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Resume Score</h4>
+                    <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">
+                      {resumeAnalysisResult ? 'ATS Resume Score' : 'Skill Match Score'}
+                    </h4>
                     <div className="w-full h-56">
                       <ResponsiveContainer>
-                        <RadialBarChart innerRadius="70%" outerRadius="100%" data={[{ name: 'Score', value: studentResult.matchScore, fill: '#22C55E' }]} startAngle={90} endAngle={-270}>
+                        <RadialBarChart 
+                          innerRadius="70%" 
+                          outerRadius="100%" 
+                          data={[{ 
+                            name: 'Score', 
+                            value: resumeAnalysisResult ? resumeAnalysisResult.ats_score : studentResult.matchScore, 
+                            fill: resumeAnalysisResult ? '#3B82F6' : '#22C55E' 
+                          }]} 
+                          startAngle={90} 
+                          endAngle={-270}
+                        >
                           <RadialBar minAngle={15} background clockWise dataKey="value" />
                         </RadialBarChart>
                       </ResponsiveContainer>
                     </div>
-                    <div className={cn('mt-2 text-center text-2xl font-bold', getScoreColor(studentResult.matchScore))}>{studentResult.matchScore}%</div>
-                    <div className="text-center text-sm text-gray-500">Best Fit: {studentResult.bestRole}</div>
+                    <div className={cn('mt-2 text-center text-2xl font-bold', getScoreColor(resumeAnalysisResult ? resumeAnalysisResult.ats_score : studentResult.matchScore))}>
+                      {resumeAnalysisResult ? resumeAnalysisResult.ats_score : studentResult.matchScore}%
+                    </div>
+                    <div className="text-center text-sm text-gray-500">
+                      {resumeAnalysisResult 
+                        ? `ATS Score - ${resumeAnalysisResult.best_role.role}` 
+                        : `Best Fit: ${studentResult.bestRole}`
+                      }
+                    </div>
                   </Card>
+                  {resumeAnalysisResult && (
+                    <div className="mt-3 text-center">
+                      <p className="text-xs text-gray-600 dark:text-gray-400">
+                        📄 Resume analyzed successfully
+                      </p>
+                      <p className="text-xs text-gray-600 dark:text-gray-400">
+                        {resumeAnalysisResult.extracted_skills.length} skills found
+                      </p>
+                    </div>
+                  )}
                   <Card>
                     <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-3">Acquired Skills</h4>
                     <div className="w-full h-56">
@@ -695,81 +830,109 @@ const hrSkillDistribution = useMemo(() => {
                       </ResponsiveContainer>
                     </div>
                   </Card>
+                  {resumeAnalysisResult && (
+                    <Card>
+                      <h5 className="font-medium text-gray-900 dark:text-white mb-4">
+                        All Role Matches for Your Resume
+                      </h5>
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {Object.entries(resumeAnalysisResult.best_role.all_roles)
+                          .sort(([, a], [, b]) => b.match_percentage - a.match_percentage)
+                          .map(([roleName, roleData]) => (
+                            <div key={roleName} className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
+                              <h6 className="font-semibold text-gray-900 dark:text-white text-sm mb-2">
+                                {roleName}
+                              </h6>
+                              <div className="flex items-center justify-between mb-2">
+                                <span className="text-xs text-gray-600 dark:text-gray-400">Match:</span>
+                                <span className={cn('font-bold text-lg', getScoreColor(roleData.match_percentage))}>
+                                  {roleData.match_percentage}%
+                                </span>
+                              </div>
+                              <div className="text-xs text-gray-600 dark:text-gray-400">
+                                {roleData.matched_count} / {roleData.total_required} skills matched
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    </Card>
+                  )}
                 </div>
               )}
 
               {studentResult && (
-  <Card>
-    <h5 className="font-medium text-gray-900 dark:text-white mb-3">
-      Top Matching Jobs ({matchedJobs.filter(j => j.calculatedScore > 0).length} found)
-    </h5>
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
-      {matchedJobs
-        .filter(job => job.calculatedScore > 0)
-        .slice(0, 50) // Show top 50 matching jobs
-        .map((job, i) => (
-          <div key={i} className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
-            <div className="flex items-start justify-between mb-2">
-              <div className="flex-1">
-                <h6 className="font-semibold text-gray-900 dark:text-white text-sm mb-1">
-                  {job.title}
-                </h6>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
-                  <Building2 className="w-3 h-3 inline mr-1" />
-                  {job.company}
-                </p>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
-                  <MapPin className="w-3 h-3 inline mr-1" />
-                  {job.location}
-                </p>
-              </div>
-              <span className={cn('font-bold text-lg', getScoreColor(job.calculatedScore))}>
-                {job.calculatedScore}%
-              </span>
-            </div>
+                <Card>
+                  <h5 className="font-medium text-gray-900 dark:text-white mb-3">
+                    Top Matching Jobs ({matchedJobs.filter(j => j.calculatedScore > 0).length} found)
+                  </h5>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[500px] overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 dark:scrollbar-thumb-gray-600">
+                    {matchedJobs
+                      .filter(job => job.calculatedScore > 0)
+                      .slice(0, 50) // Show top 50 matching jobs
+                      .map((job, i) => (
+                        <div key={i} className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 border border-gray-200 dark:border-gray-600">
+                          <div className="flex items-start justify-between mb-2">
+                            <div className="flex-1">
+                              <h6 className="font-semibold text-gray-900 dark:text-white text-sm mb-1">
+                                {job.title}
+                              </h6>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mb-1">
+                                <Building2 className="w-3 h-3 inline mr-1" />
+                                {job.company}
+                              </p>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+                                <MapPin className="w-3 h-3 inline mr-1" />
+                                {job.location}
+                              </p>
+                            </div>
+                            <span className={cn('font-bold text-lg', getScoreColor(job.calculatedScore))}>
+                              {job.calculatedScore}%
+                            </span>
+                          </div>
 
-            {/* ✅ Matching Skills */}
-            {job.matchingSkills && job.matchingSkills.length > 0 && (
-              <div className="mb-2">
-                <p className="text-xs text-green-600 dark:text-green-400 font-medium mb-1">
-                  ✓ You have:
-                </p>
-                <div className="flex flex-wrap gap-1">
-                  {job.matchingSkills.slice(0, 3).map((s, j) => (
-                    <span key={j} className="px-2 py-0.5 bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400 text-xs rounded">
-                      {s}
-                    </span>
-                  ))}
-                  {job.matchingSkills.length > 3 && (
-                    <span className="text-xs text-gray-500">+{job.matchingSkills.length - 3} more</span>
-                  )}
-                </div>
-              </div>
-            )}
+                          {/* ✅ Matching Skills */}
+                          {job.matchingSkills && job.matchingSkills.length > 0 && (
+                            <div className="mb-2">
+                              <p className="text-xs text-green-600 dark:text-green-400 font-medium mb-1">
+                                ✓ You have:
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                {job.matchingSkills.slice(0, 3).map((s, j) => (
+                                  <span key={j} className="px-2 py-0.5 bg-green-100 text-green-700 dark:bg-green-900/20 dark:text-green-400 text-xs rounded">
+                                    {s}
+                                  </span>
+                                ))}
+                                {job.matchingSkills.length > 3 && (
+                                  <span className="text-xs text-gray-500">+{job.matchingSkills.length - 3} more</span>
+                                )}
+                              </div>
+                            </div>
+                          )}
 
-            {/* ✅ Missing Skills */}
-            {job.missingSkills && job.missingSkills.length > 0 && (
-              <div>
-                <p className="text-xs text-red-600 dark:text-red-400 font-medium mb-1">
-                  ✗ Need to learn:
-                </p>
-                <div className="flex flex-wrap gap-1">
-                  {job.missingSkills.slice(0, 3).map((s, j) => (
-                    <span key={j} className="px-2 py-0.5 bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400 text-xs rounded">
-                      {s}
-                    </span>
-                  ))}
-                  {job.missingSkills.length > 3 && (
-                    <span className="text-xs text-gray-500">+{job.missingSkills.length - 3} more</span>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-    </div>
-  </Card>
-)}
+                          {/* ✅ Missing Skills */}
+                          {job.missingSkills && job.missingSkills.length > 0 && (
+                            <div>
+                              <p className="text-xs text-red-600 dark:text-red-400 font-medium mb-1">
+                                ✗ Need to learn:
+                              </p>
+                              <div className="flex flex-wrap gap-1">
+                                {job.missingSkills.slice(0, 3).map((s, j) => (
+                                  <span key={j} className="px-2 py-0.5 bg-red-100 text-red-700 dark:bg-red-900/20 dark:text-red-400 text-xs rounded">
+                                    {s}
+                                  </span>
+                                ))}
+                                {job.missingSkills.length > 3 && (
+                                  <span className="text-xs text-gray-500">+{job.missingSkills.length - 3} more</span>
+                                )}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                </Card>
+              )}
+
             </motion.div>
           )}
 

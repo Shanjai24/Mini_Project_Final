@@ -270,7 +270,182 @@ async def add_skills(category: str = Form(...), skills: str = Form(...)):
         "category": category,
         "added_skills": new_skills
     }
-
+@app.post("/api/analyze-student-resume")
+async def analyze_student_resume(file: UploadFile = File(...)):
+    """
+    Analyze a single student resume and provide:
+    - ATS score
+    - Extracted skills
+    - Best role match
+    - Recommendations
+    """
+    temp_path = None
+    try:
+        # Save uploaded file temporarily
+        temp_path = f"temp_{file.filename}"
+        with open(temp_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+        
+        # ✅ Use existing parser
+        resume_text = parser.parse_resume(temp_path)
+        cleaned_text = parser.clean_text(resume_text)
+        
+        # Extract candidate name (basic extraction)
+        lines = cleaned_text.split('\n')
+        candidate_name = "Unknown Candidate"
+        for line in lines[:5]:
+            line = line.strip()
+            words = line.split()
+            if 2 <= len(words) <= 4 and not any(keyword in line.lower() for keyword in ['email', 'phone', 'address', 'objective', 'summary']):
+                candidate_name = line
+                break
+        
+        # ✅ Use existing feature extractor
+        features = extractor.extract_all_features(cleaned_text)
+        
+        # ✅ FIX: Handle skills extraction properly
+        raw_skills = features.get('skills', [])
+        
+        # Convert to list if it's a dict or other structure
+        if isinstance(raw_skills, dict):
+            extracted_skills = list(raw_skills.keys())
+        elif isinstance(raw_skills, list):
+            extracted_skills = raw_skills
+        else:
+            extracted_skills = []
+        
+        # Ensure all skills are strings and lowercase
+        extracted_skills = [str(skill).lower() for skill in extracted_skills if skill]
+        
+        # Calculate ATS score
+        score = 50  # Base score
+        
+        # Check for key sections
+        sections = ['experience', 'education', 'skills', 'projects']
+        for section in sections:
+            if section in cleaned_text.lower():
+                score += 8
+        
+        # Check for contact information
+        if '@' in cleaned_text:  # Email
+            score += 5
+        if any(char.isdigit() for char in cleaned_text[:200]):  # Phone in header
+            score += 5
+        
+        # Skills count bonus
+        if len(extracted_skills) >= 10:
+            score += 10
+        elif len(extracted_skills) >= 5:
+            score += 5
+        
+        # Length check
+        word_count = len(cleaned_text.split())
+        if 300 <= word_count <= 1000:
+            score += 10
+        elif 200 <= word_count < 300 or 1000 < word_count <= 1500:
+            score += 5
+        
+        ats_score = min(score, 100)
+        
+        # Define role requirements
+        role_requirements = {
+            "Software Engineer": ["python", "java", "javascript", "react", "node.js", "git", "sql", "api", "restful", "agile"],
+            "Data Scientist": ["python", "machine learning", "pandas", "numpy", "sql", "tensorflow", "scikit-learn", "statistics", "deep learning", "data visualization"],
+            "Frontend Developer": ["javascript", "react", "angular", "vue", "html", "css", "typescript", "webpack", "redux", "sass"],
+            "Backend Developer": ["python", "java", "node.js", "sql", "mongodb", "api", "microservices", "docker", "kubernetes", "aws"],
+            "Full Stack Developer": ["javascript", "react", "node.js", "python", "sql", "mongodb", "api", "git", "aws", "docker"],
+            "DevOps Engineer": ["docker", "kubernetes", "aws", "ci/cd", "jenkins", "terraform", "ansible", "linux", "git", "monitoring"],
+            "Data Analyst": ["sql", "excel", "python", "tableau", "power bi", "data visualization", "statistics", "pandas", "reporting"],
+            "Product Manager": ["agile", "jira", "product strategy", "roadmap", "stakeholder management", "analytics", "user research"],
+            "Business Analyst": ["sql", "excel", "business intelligence", "requirements gathering", "documentation", "stakeholder management"],
+            "Mobile Developer": ["react native", "flutter", "swift", "kotlin", "android", "ios", "mobile ui", "api integration"]
+        }
+        
+        # Calculate match for each role
+        all_roles = {}
+        for role_name, required_skills in role_requirements.items():
+            # ✅ FIX: Safer skill matching
+            matched_skills = []
+            for skill in extracted_skills:
+                for req in required_skills:
+                    if req.lower() in skill or skill in req.lower():
+                        matched_skills.append(skill)
+                        break
+            
+            match_percentage = int((len(matched_skills) / len(required_skills)) * 100) if required_skills else 0
+            
+            missing_skills = []
+            for req in required_skills:
+                if not any(req.lower() in skill or skill in req.lower() for skill in extracted_skills):
+                    missing_skills.append(req)
+            
+            all_roles[role_name] = {
+                "match_percentage": match_percentage,
+                "matched_count": len(matched_skills),
+                "total_required": len(required_skills),
+                "matched_skills": matched_skills[:10],
+                "missing_skills": missing_skills[:5]
+            }
+        
+        # Find best role match
+        best_role_name = max(all_roles.items(), key=lambda x: x[1]["match_percentage"])[0]
+        best_role_data = all_roles[best_role_name]
+        
+        # Generate recommendations
+        recommendations = []
+        
+        if ats_score < 70:
+            recommendations.append("Improve resume formatting and structure for better ATS compatibility")
+        
+        if len(extracted_skills) < 10:
+            recommendations.append("Add more relevant technical skills to strengthen your profile")
+        
+        if best_role_data["match_percentage"] < 50:
+            recommendations.append(f"Consider learning key skills for {best_role_name}")
+        
+        if best_role_data["missing_skills"]:
+            top_missing = ', '.join(best_role_data["missing_skills"][:3])
+            recommendations.append(f"Focus on acquiring these in-demand skills: {top_missing}")
+        
+        if ats_score >= 80:
+            recommendations.append("Your resume is well-optimized! Consider adding quantifiable achievements")
+        
+        recommendations.append("Tailor your resume for specific job descriptions to improve match scores")
+        
+        # Clean up temp file
+        if temp_path and os.path.exists(temp_path):
+            os.remove(temp_path)
+        
+        return {
+            "candidate_name": candidate_name,
+            "ats_score": ats_score,
+            "extracted_skills": extracted_skills[:30],  # ✅ Now safe to slice
+            "best_role": {
+                "role": best_role_name,
+                "match_percentage": best_role_data["match_percentage"],
+                "matched_count": best_role_data["matched_count"],
+                "total_required": best_role_data["total_required"],
+                "matched_skills": best_role_data["matched_skills"],
+                "missing_skills": best_role_data["missing_skills"],
+                "all_roles": all_roles
+            },
+            "recommendations": recommendations[:5]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analyzing student resume: {str(e)}")
+        import traceback
+        logger.error(traceback.format_exc())  # ✅ Log full traceback for debugging
+        
+        # Clean up temp file on error
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except:
+                pass
+        
+        raise HTTPException(status_code=500, detail=f"Error analyzing resume: {str(e)}")
 
 # Run the server
 if __name__ == "__main__":
