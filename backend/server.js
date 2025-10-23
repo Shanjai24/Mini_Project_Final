@@ -14,23 +14,19 @@ import fs from 'fs';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load environment variables from .env file in the root directory
 const envPath = path.join(__dirname, '..', '.env');
 dotenv.config({ path: envPath });
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
-// ML API Configuration
 const ML_API_URL = process.env.ML_API_URL || 'http://localhost:8000';
 
 app.use(cors());
 app.use(express.json());
 
-// Configure multer for file uploads
 const upload = multer({ 
   dest: 'uploads/',
-  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
+  limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['.pdf', '.docx', '.doc'];
     const ext = path.extname(file.originalname).toLowerCase();
@@ -70,7 +66,6 @@ async function startServer() {
   `);
   console.log('✅ Ensured users table exists');
 
-  // Create resume uploads table
   await pool.query(`
     CREATE TABLE IF NOT EXISTS resume_uploads (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -85,7 +80,6 @@ async function startServer() {
   `);
   console.log('✅ Ensured resume_uploads table exists');
 
-  // Create candidates table with candidate_name column
   await pool.query(`
     CREATE TABLE IF NOT EXISTS candidates (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -122,7 +116,6 @@ app.post('/api/login', async (req, res) => {
     let user;
     if (users.length === 0) {
       const hashedPassword = await bcrypt.hash(password, 10);
-      // Normalize role: accept "HR Professional", "Hr", "HR" as Hr role
       const normalizedRole = role && (role.toLowerCase().includes('hr') || role === 'Hr') ? 'Hr' : 'Student';
       const [ins] = await pool.query(
         'INSERT INTO users (name, email, password, role) VALUES (?, ?, ?, ?)',
@@ -204,7 +197,6 @@ app.delete('/api/delete-account', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ FIXED: Resume upload and ML matching endpoint
 app.post('/api/match-resumes', authenticateToken, upload.array('files', 20), async (req, res) => {
   try {
     const { userId } = req.user;
@@ -212,10 +204,7 @@ app.post('/api/match-resumes', authenticateToken, upload.array('files', 20), asy
     const files = req.files;
 
     console.log('📁 Received files:', files?.length);
-
-    // Validate input
     if (!files || files.length < 5 || files.length > 20) {
-      // Clean up uploaded files
       files?.forEach(file => {
         try {
           fs.unlinkSync(file.path);
@@ -233,7 +222,6 @@ app.post('/api/match-resumes', authenticateToken, upload.array('files', 20), asy
       return res.status(400).json({ message: 'Job role and description are required' });
     }
 
-    // Prepare data for ML API
     const formData = new FormData();
     files.forEach(file => {
       const fileBuffer = fs.readFileSync(file.path);
@@ -243,7 +231,6 @@ app.post('/api/match-resumes', authenticateToken, upload.array('files', 20), asy
     });
   });
 
-    // Prepare job requirements
     const jobRequirements = {
       required_skills: requiredSkills ? requiredSkills.split(',').map(s => s.trim().toLowerCase()) : [],
       min_education_level: parseInt(minEducation) || 0,
@@ -254,7 +241,6 @@ app.post('/api/match-resumes', authenticateToken, upload.array('files', 20), asy
     formData.append('job_requirements', JSON.stringify(jobRequirements));
     formData.append('top_n', topN || 5);
 
-    // Call ML API
     console.log('🚀 Calling ML API at:', `${ML_API_URL}/api/match-resumes`);
     const mlResponse = await fetch(`${ML_API_URL}/api/match-resumes`, {
       method: 'POST',
@@ -273,7 +259,6 @@ app.post('/api/match-resumes', authenticateToken, upload.array('files', 20), asy
     const mlResults = await mlResponse.json();
     console.log('✅ ML Results received:', mlResults);
 
-    // Save to database
     const [uploadResult] = await pool.query(
       `INSERT INTO resume_uploads (user_id, job_role, job_description, total_resumes, required_candidates) 
        VALUES (?, ?, ?, ?, ?)`,
@@ -282,7 +267,6 @@ app.post('/api/match-resumes', authenticateToken, upload.array('files', 20), asy
 
     const uploadId = uploadResult.insertId;
 
-    // Save top candidates with candidate_name
     for (let i = 0; i < mlResults.top_candidates.length; i++) {
       const candidate = mlResults.top_candidates[i];
       await pool.query(
@@ -291,7 +275,7 @@ app.post('/api/match-resumes', authenticateToken, upload.array('files', 20), asy
         [
           uploadId,
           candidate.filename,
-          candidate.candidate_name || 'Unknown Candidate',  // ✅ ADD THIS
+          candidate.candidate_name || 'Unknown Candidate',
           candidate.score,
           candidate.semantic_score,
           candidate.feature_score,
@@ -301,7 +285,6 @@ app.post('/api/match-resumes', authenticateToken, upload.array('files', 20), asy
       );
     }
 
-    // Clean up uploaded files
     files.forEach(file => {
       try {
         fs.unlinkSync(file.path);
@@ -320,7 +303,6 @@ app.post('/api/match-resumes', authenticateToken, upload.array('files', 20), asy
 
   } catch (error) {
     console.error('❌ Match resumes error:', error);
-    // Clean up files on error
     if (req.files) {
       req.files.forEach(file => {
         try {
@@ -332,7 +314,6 @@ app.post('/api/match-resumes', authenticateToken, upload.array('files', 20), asy
   }
 });
 
-// Get user's upload history
 app.get("/api/upload-history", authenticateToken, async (req, res) => {
   try {
     const { userId } = req.user;
@@ -359,13 +340,10 @@ app.get("/api/upload-history", authenticateToken, async (req, res) => {
   }
 });
 
-// Get candidates for a specific upload
 app.get('/api/candidates/:uploadId', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.user;
     const { uploadId } = req.params;
-
-    // Verify upload belongs to user
     const [uploads] = await pool.query(
       'SELECT * FROM resume_uploads WHERE id = ? AND user_id = ?',
       [uploadId, userId]
@@ -393,7 +371,6 @@ app.get('/api/candidates/:uploadId', authenticateToken, async (req, res) => {
   }
 });
 
-// Get dashboard stats
 app.get('/api/dashboard-stats', authenticateToken, async (req, res) => {
   try {
     const { userId } = req.user;
@@ -428,7 +405,6 @@ app.get('/api/dashboard-stats', authenticateToken, async (req, res) => {
   }
 });
 
-// ✅ ADD THIS: Student resume analysis endpoint
 app.post('/api/analyze-student-resume', upload.single('file'), async (req, res) => {
   try {
     const file = req.file;
@@ -438,8 +414,6 @@ app.post('/api/analyze-student-resume', upload.single('file'), async (req, res) 
     }
 
     console.log('📄 Analyzing student resume:', file.originalname);
-
-    // Prepare data for ML API
     const formData = new FormData();
     const fileBuffer = fs.readFileSync(file.path);
     formData.append('file', fileBuffer, {
@@ -447,7 +421,6 @@ app.post('/api/analyze-student-resume', upload.single('file'), async (req, res) 
       contentType: file.mimetype
     });
 
-    // Call ML API for student resume analysis
     console.log('🚀 Calling ML API at:', `${ML_API_URL}/api/analyze-student-resume`);
     const mlResponse = await fetch(`${ML_API_URL}/api/analyze-student-resume`, {
       method: 'POST',
@@ -460,8 +433,6 @@ app.post('/api/analyze-student-resume', upload.single('file'), async (req, res) 
     if (!mlResponse.ok) {
       const errorText = await mlResponse.text();
       console.error('❌ ML API error response:', errorText);
-      
-      // Clean up uploaded file
       try {
         fs.unlinkSync(file.path);
       } catch (err) {
@@ -473,8 +444,6 @@ app.post('/api/analyze-student-resume', upload.single('file'), async (req, res) 
 
     const mlResults = await mlResponse.json();
     console.log('✅ ML Results received:', mlResults);
-
-    // Clean up uploaded file
     try {
       fs.unlinkSync(file.path);
     } catch (err) {
@@ -485,8 +454,6 @@ app.post('/api/analyze-student-resume', upload.single('file'), async (req, res) 
 
   } catch (error) {
     console.error('❌ Student resume analysis error:', error);
-    
-    // Clean up file on error
     if (req.file) {
       try {
         fs.unlinkSync(req.file.path);

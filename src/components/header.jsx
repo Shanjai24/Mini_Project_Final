@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { 
@@ -20,6 +20,7 @@ import { cn } from '../utils/cn';
 export default function Header() {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const userMenuRef = useRef(null);
   const location = useLocation();
   const navigate = useNavigate();
   
@@ -30,6 +31,17 @@ export default function Header() {
       document.documentElement.classList.toggle('dark', theme === 'dark');
     }
   }, [theme]);
+
+  useEffect(() => {
+    function handleClickOutside(event) {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target)) {
+        setIsUserMenuOpen(false);
+      }
+    }
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
 
   const navigation = [
     { name: 'Profile', href: '/profile', icon: UserCircle },
@@ -131,8 +143,8 @@ export default function Header() {
             </motion.button>
 
             {/* User Menu */}
-            {isAuthenticated ? (
-              <div className="relative">
+              {isAuthenticated ? (
+                <div className="relative" ref={userMenuRef}>
                 <motion.button
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
