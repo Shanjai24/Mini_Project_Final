@@ -410,7 +410,7 @@ const onStudentResume = async (e) => {
   // ---- HR actions ----
   const onHrFiles = (e) => {
     const files = Array.from(e.target.files);
-    if (files.length < 5 || files.length > 20) {
+    if (files.length < 3 || files.length > 20) {
       setHrError("Please upload between 5 and 20 resumes");
       setHrFiles([]);
       return;
@@ -420,7 +420,7 @@ const onStudentResume = async (e) => {
   };
 
   const handleRankCandidates = async () => {
-    if (hrFiles.length < 5 || hrFiles.length > 20) {
+    if (hrFiles.length < 3 || hrFiles.length > 20) {
       setHrError('Please upload between 5 and 20 resumes');
       return;
     }
@@ -1156,7 +1156,7 @@ const hrSkillDistribution = useMemo(() => {
 
                 <div className="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-6 border border-gray-200 dark:border-gray-600">
                   <h4 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">
-                    Upload Resumes (5–20 files)
+                    Upload Resumes (2–20 files)
                   </h4>
                   <label className="flex flex-col items-center justify-center h-32 border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors">
                     <Upload className="w-6 h-6 text-gray-500 dark:text-gray-400 mb-2" />
@@ -1172,7 +1172,7 @@ const hrSkillDistribution = useMemo(() => {
 
                   <button
                     onClick={async () => {
-                      if (hrFiles.length < 5 || hrFiles.length > 20) {
+                      if (hrFiles.length < 3 || hrFiles.length > 20) {
                         setHrError('Please upload between 5 and 20 resumes');
                         return;
                       }

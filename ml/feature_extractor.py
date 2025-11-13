@@ -55,37 +55,130 @@ class FeatureExtractor:
     def extract_name(self, text: str) -> str:
         """
         Extract candidate name from resume text.
-        Uses multiple strategies to find the most likely name.
+        Uses multiple strategies with confidence scoring.
         """
-        # Strategy 1: Look for name in first 500 characters (usually at top)
-        doc = nlp(text[:500])
+        # ✅ ADD LOGGING AT THE START
+        import logging
+        logger = logging.getLogger(__name__)
         
-        # Get all PERSON entities
-        person_entities = [ent.text for ent in doc.ents if ent.label_ == "PERSON"]
+        logger.info("=" * 50)
+        logger.info("Starting name extraction...")
+        logger.info(f"First 200 chars of text:\n{text[:200]}")
+        logger.info("=" * 50)
+        
+        # Strategy 1: Look for name in first 1000 characters (extended range)
+        doc = nlp(text[:1000])
+        
+        # Get all PERSON entities with their positions
+        person_entities = [(ent.text.strip(), ent.start_char) for ent in doc.ents if ent.label_ == "PERSON"]
+        
+        # ✅ ADD LOGGING FOR STRATEGY 1
+        logger.info(f"Strategy 1 - SpaCy NER found {len(person_entities)} PERSON entities: {person_entities}")
+        
+        # Filter out common false positives
+        false_positives = ['resume', 'cv', 'curriculum vitae', 'dear', 'sir', 'madam', 'hiring', 'manager']
+        person_entities = [(name, pos) for name, pos in person_entities 
+                        if not any(fp in name.lower() for fp in false_positives)]
+        
+        # ✅ ADD LOGGING AFTER FILTERING
+        logger.info(f"After filtering false positives: {person_entities}")
         
         if person_entities:
-            # Return the first person name found (usually the candidate's name)
-            name = person_entities[0].strip()
+            # Return the FIRST person entity (usually the candidate's name at top)
+            name = person_entities[0][0]
             # Clean up the name
             name = re.sub(r'\s+', ' ', name)
-            return name
+            # Validate name (should be 2-5 words, mostly alphabetic)
+            words = name.split()
+            if 2 <= len(words) <= 5 and all(word[0].isupper() for word in words if word):
+                # ✅ ADD SUCCESS LOGGING
+                logger.info(f"✅ Strategy 1 SUCCESS - Extracted name: '{name}'")
+                return name
+            else:
+                # ✅ ADD FAILURE LOGGING
+                logger.warning(f"❌ Strategy 1 FAILED validation - Name: '{name}', Words: {words}")
         
-        # Strategy 2: Look for common name patterns in first few lines
-        lines = text.split('\n')[:10]
-        for line in lines:
+        # Strategy 2: Look for name patterns in first 15 lines
+        # ✅ ADD LOGGING FOR STRATEGY 2
+        logger.info("Strategy 1 failed, trying Strategy 2 - Line pattern matching...")
+        
+        lines = text.split('\n')[:15]
+        logger.info(f"Analyzing first {len(lines)} lines")
+        
+        # Common resume section headers to avoid
+        section_keywords = [
+            'resume', 'curriculum', 'vitae', 'profile', 'summary', 'objective', 
+            'contact', 'education', 'experience', 'skills', 'projects', 'work',
+            'email', 'phone', 'address', 'linkedin', 'github', 'portfolio'
+        ]
+        
+        for i, line in enumerate(lines):
             line = line.strip()
-            # Look for lines that are 2-4 words, capitalized, and not too long
+            
+            # Skip empty lines or lines with special characters
+            if not line or len(line) < 3 or any(char in line for char in ['@', '|', ':', '•']):
+                continue
+            
             words = line.split()
+            
+            # ✅ ADD DETAILED LOGGING FOR EACH LINE
+            logger.debug(f"Line {i}: '{line}' - Words: {len(words)}")
+            
+            # Name should be 2-4 words, properly capitalized, not too long
             if 2 <= len(words) <= 4 and len(line) < 50:
-                # Check if it looks like a name (all words capitalized)
-                if all(word[0].isupper() for word in words if word):
-                    # Avoid common resume section headers
-                    if not any(keyword in line.lower() for keyword in 
-                              ['resume', 'curriculum', 'vitae', 'profile', 'summary', 
-                               'objective', 'contact', 'education', 'experience']):
+                # Check if all words start with capital letter
+                if all(word[0].isupper() and word.isalpha() for word in words):
+                    # Check it's not a section header
+                    if not any(keyword in line.lower() for keyword in section_keywords):
+                        # ✅ ADD SUCCESS LOGGING
+                        logger.info(f"✅ Strategy 2 SUCCESS - Extracted name from line {i}: '{line}'")
                         return line
+                    else:
+                        logger.debug(f"Line {i} rejected - matches section keyword")
+                else:
+                    logger.debug(f"Line {i} rejected - capitalization check failed")
         
-        # Strategy 3: Fallback - return "Candidate" + resume number
+        # Strategy 3: Look for email prefix (name often appears before @)
+        # ✅ ADD LOGGING FOR STRATEGY 3
+        logger.info("Strategy 2 failed, trying Strategy 3 - Email prefix extraction...")
+        
+        email_pattern = r'([A-Za-z]+(?:\s+[A-Za-z]+)?)\s*[:\-]?\s*([a-zA-Z0-9._%+-]+@)'
+        email_match = re.search(email_pattern, text[:500])
+        
+        if email_match:
+            potential_name = email_match.group(1).strip()
+            logger.info(f"Found potential name near email: '{potential_name}'")
+            words = potential_name.split()
+            if 1 <= len(words) <= 3:
+                # ✅ ADD SUCCESS LOGGING
+                result = potential_name.title()
+                logger.info(f"✅ Strategy 3 SUCCESS - Extracted name: '{result}'")
+                return result
+        else:
+            logger.info("No email pattern found")
+        
+        # Strategy 4: Fallback - return first line if it looks like a name
+        # ✅ ADD LOGGING FOR STRATEGY 4
+        logger.info("Strategy 3 failed, trying Strategy 4 - First line fallback...")
+        
+        first_line = text.split('\n')[0].strip()
+        logger.info(f"First line: '{first_line}'")
+        
+        words = first_line.split()
+        if 2 <= len(words) <= 4 and len(first_line) < 50:
+            if all(word[0].isupper() for word in words if word.isalpha()):
+                # ✅ ADD SUCCESS LOGGING
+                logger.info(f"✅ Strategy 4 SUCCESS - Using first line: '{first_line}'")
+                return first_line
+            else:
+                logger.warning(f"First line failed capitalization check: {words}")
+        else:
+            logger.warning(f"First line failed length check - Words: {len(words)}, Length: {len(first_line)}")
+        
+        # ✅ ADD FINAL FAILURE LOGGING
+        logger.error("❌ ALL STRATEGIES FAILED - Returning 'Unknown Candidate'")
+        logger.info("=" * 50)
+        
         return "Unknown Candidate"
     
     def extract_skills(self, text: str) -> Dict[str, List[str]]:

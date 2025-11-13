@@ -291,15 +291,29 @@ async def analyze_student_resume(file: UploadFile = File(...)):
         resume_text = parser.parse_resume(temp_path)
         cleaned_text = parser.clean_text(resume_text)
         
-        # Extract candidate name (basic extraction)
-        lines = cleaned_text.split('\n')
-        candidate_name = "Unknown Candidate"
-        for line in lines[:5]:
-            line = line.strip()
-            words = line.split()
-            if 2 <= len(words) <= 4 and not any(keyword in line.lower() for keyword in ['email', 'phone', 'address', 'objective', 'summary']):
-                candidate_name = line
-                break
+        # ✅ IMPROVED: Extract candidate name using feature extractor
+        features = extractor.extract_all_features(cleaned_text)
+        candidate_name = features.get('name', 'Unknown Candidate')
+
+        # Fallback if extraction failed
+        if candidate_name == 'Unknown Candidate':
+            logger.warning("Name extraction failed, trying fallback method")
+            lines = cleaned_text.split('\n')
+            for line in lines[:10]:
+                line = line.strip()
+                # Skip lines with email, phone, or numbers
+                if not line or '@' in line or any(char.isdigit() for char in line[:20]):
+                    continue
+                words = line.split()
+                # Name should be 2-4 words, capitalized, not too long
+                if 2 <= len(words) <= 4 and len(line) < 50:
+                    if all(w[0].isupper() for w in words if w.isalpha()):
+                        excluded = ['resume', 'cv', 'curriculum', 'vitae', 'profile', 'summary', 
+                                'objective', 'education', 'experience', 'skills', 'contact']
+                        if not any(e in line.lower() for e in excluded):
+                            candidate_name = line
+                            logger.info(f"Fallback extracted name: {candidate_name}")
+                            break
         
         # ✅ Use existing feature extractor
         features = extractor.extract_all_features(cleaned_text)
