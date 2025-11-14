@@ -1,0 +1,9 @@
+{
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "https://mini-project-final-six.vercel.app",
+      "permanent": false
+    }
+  ]
+}
