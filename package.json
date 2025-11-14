@@ -10,7 +10,7 @@
     "format": "prettier --write .",
     "server": "cd backend && npm start",
     "ml": "cd ml && python api_server.py",
-    "start": "concurrently \"npm run dev\" \"npm run server\" \"npm run ml\""
+    "start": "npm install -g concurrently && concurrently \"npm run dev\" \"npm run server\" \"npm run ml\""
   },
   "dependencies": {
     "@vitejs/plugin-react": "^5.0.1",
