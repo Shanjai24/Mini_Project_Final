@@ -24,8 +24,7 @@ const ML_API_URL = process.env.ML_API_URL || 'http://localhost:8000';
 app.use(cors({
   origin: [
     'http://localhost:5173',
-    'http://localhost:3000', 
-    'https://*.vercel.app'
+    'https://mini-project-final-six.vercel.app'
   ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
