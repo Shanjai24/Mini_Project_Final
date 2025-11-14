@@ -1,9 +1,8 @@
-// API Service Layer for Frontend
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000';
+import { API_BASE_URL } from '../config/api';
 
 // Helper function to get auth token
 const getAuthToken = () => {
-  return localStorage.getItem('authToken');
+  return localStorage.getItem('token');
 };
 
 // Helper function to handle API responses
@@ -28,9 +27,8 @@ export const authAPI = {
     
     const data = await handleResponse(response);
     
-    // Store token in localStorage
     if (data.token) {
-      localStorage.setItem('authToken', data.token);
+      localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
     }
     
@@ -38,7 +36,7 @@ export const authAPI = {
   },
 
   logout: () => {
-    localStorage.removeItem('authToken');
+    localStorage.removeItem('token');
     localStorage.removeItem('user');
   },
 
@@ -132,12 +130,10 @@ export const dashboardAPI = {
   },
 };
 
-// Check if user is authenticated
 export const isAuthenticated = () => {
   return !!getAuthToken();
 };
 
-// Get current user from localStorage
 export const getCurrentUser = () => {
   const userStr = localStorage.getItem('user');
   return userStr ? JSON.parse(userStr) : null;

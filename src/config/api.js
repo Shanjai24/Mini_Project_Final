@@ -1,5 +1,7 @@
 // API Configuration
-export const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3000';
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://miniprojectfinal-production.up.railway.app';
+
+export const ML_API_URL = import.meta.env.VITE_ML_API_URL || 'https://shanjai245-resume-matcher.hf.space';
 
 export const API_ENDPOINTS = {
   AUTH: {
@@ -9,14 +11,13 @@ export const API_ENDPOINTS = {
   },
   RESUME: {
     UPLOAD: '/api/upload',
-    MATCH: '/api/match',
+    MATCH: '/api/match-resumes',
     CANDIDATES: '/api/candidates',
+    HISTORY: '/api/upload-history',
   },
-  ML_API: {
-    BASE_URL: process.env.REACT_APP_ML_API_URL || 'http://localhost:8000',
-    MATCH: '/match',
-    SKILLS: '/skills',
-  },
+  DASHBOARD: {
+    STATS: '/api/dashboard-stats',
+  }
 };
 
 export const ROLES = {
@@ -29,7 +30,7 @@ export const EDUCATION_LEVELS = [
   { id: 0, label: 'No Formal Education' },
   { id: 1, label: 'Certificate' },
   { id: 2, label: 'Diploma' },
-  { id: 3, label: 'Bachelor\'s Degree' },
-  { id: 4, label: 'Master\'s Degree' },
+  { id: 3, label: "Bachelor's Degree" },
+  { id: 4, label: "Master's Degree" },
   { id: 5, label: 'PhD' },
 ];

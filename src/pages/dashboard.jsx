@@ -8,6 +8,8 @@ import { dashboardAPI, resumeAPI, getCurrentUser } from '../services/api';
 import { useNavigate } from 'react-router-dom';
 import { jobListings } from '../data/jobListings';
 
+import { API_BASE_URL, ML_API_URL } from '../config/api';
+
 const colors = {
   primary: "#1976d2",
   success: "#2e7d32",
@@ -147,7 +149,7 @@ const toggleDropdown = (id) => {
           const allCandidates = [];
 
           for (const upload of history) {
-            const res = await fetch(`http://localhost:3000/api/candidates/${upload.id}`, {
+            const res = await fetch(`${API_BASE_URL}/api/candidates/${upload.id}`, {
               headers: { Authorization: `Bearer ${token}` },
             });
             if (res.ok) {
@@ -364,7 +366,7 @@ const onStudentResume = async (e) => {
     const formData = new FormData();
     formData.append('file', file);
     
-    const response = await fetch('http://localhost:8000/api/analyze-student-resume', {
+    const response = await fetch(`${ML_API_URL}/api/analyze-student-resume`, {
       method: 'POST',
       body: formData
     });
@@ -1194,7 +1196,7 @@ const hrSkillDistribution = useMemo(() => {
                         formData.append('minExperience', minExperience);
                         formData.append('topN', topN);
 
-                        const res = await fetch('http://localhost:3000/api/match-resumes', {
+                        const res = await fetch(`${API_BASE_URL}/api/match-resumes`, {
                           method: 'POST',
                           headers: { Authorization: `Bearer ${token}` },
                           body: formData,
@@ -1217,7 +1219,7 @@ const hrSkillDistribution = useMemo(() => {
 
                         const newUploadId = data.uploadId;
                         if (newUploadId) {
-                          const candidateRes = await fetch(`http://localhost:3000/api/candidates/${newUploadId}`, {
+                          const candidateRes = await fetch(`${API_BASE_URL}/api/candidates/${newUploadId}`, {
                             headers: { Authorization: `Bearer ${token}` },
                           });
                           if (candidateRes.ok) {

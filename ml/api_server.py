@@ -24,7 +24,12 @@ app = FastAPI(title="HR Seeker API", version="1.0.0")
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Update with your frontend URL in production
+    allow_origins=[
+        "http://localhost:5173",
+        "http://localhost:3000",
+        "https://*.vercel.app",
+        "https://miniprojectfinal-production.up.railway.app"
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
